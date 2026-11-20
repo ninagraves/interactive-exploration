@@ -27,14 +27,13 @@ import {
   type LaidOutArc,
   type Layout,
   layoutGraph,
-  reduceLayout,
   SIZES,
   type TerminalNodeData,
 } from "../lib/dfgLayout";
 import { num } from "../lib/format";
 
 type NodeData = (ActivityNodeData | TerminalNodeData) & { colours: Map<string, string> };
-type ArcData = LaidOutArc & { colour: string; width: number; onRemove?: (arc: LaidOutArc) => void };
+type ArcData = LaidOutArc & { colour: string; width: number };
 
 /** Invisible handles: React Flow needs them to draw an edge, the path itself comes from ELK. */
 const Handles = () => (
@@ -147,13 +146,12 @@ const TerminalNode = memo(({ data }: NodeProps<Node<NodeData>>) => {
 /**
  * Arc: ELK's route in the object type's colour, with a small plain label (count or objects) that interrupts the line.
  * Hovering the line or the label shows its numbers and, for an arc shown only because of "Stay connected", says so
- * (drawn like every other arc; Nina, 2026-11-17). A double click on the arc or its label removes it (Nina, 2026-11-20;
- * before: right click).
+ * (drawn like every other arc; Nina, 2026-11-17).
  */
 const ArcEdge = memo(({ id, data, markerEnd }: EdgeProps<Edge<ArcData>>) => {
   if (!data?.path) return null;
   const position = data.labelPosition;
-  const hint = `${data.objectType}: ${num(data.count)} traversals, ${num(data.objects)} objects${data.connecting ? " · only kept to stay connected (Arcs (projection) or Arcs (display) would hide it)" : ""} · double click to remove`;
+  const hint = `${data.objectType}: ${num(data.count)} traversals, ${num(data.objects)} objects${data.connecting ? " · only kept to stay connected (Arcs (projection) or Arcs (display) would hide it)" : ""}`;
   return (
     <>
       <BaseEdge
@@ -172,11 +170,6 @@ const ArcEdge = memo(({ id, data, markerEnd }: EdgeProps<Edge<ArcData>>) => {
           <Tooltip label={hint} withinPortal>
             <Box
               className="nodrag nopan"
-              onDoubleClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                data.onRemove?.(data);
-              }}
               style={{
                 position: "absolute",
                 transform: `translate(-50%, -50%) translate(${position.x}px, ${position.y}px)`,
@@ -206,8 +199,7 @@ const Legend = () => (
     ▶ / ■ in a circle: start / end of an object type (named below; arcs from and to them are grey) · coloured line:
     directly-follows arc of a selected object type (thicker = more traversals) · number on an arc: traversals or objects ·
     hover an arc: its numbers, and whether it is only kept to stay connected · number in an activity: its events on the included traces · small circle on an
-    activity: an unselected object type involved in these events · double click on an arc: remove it · double click on an
-    activity: deselect it · right click on an activity: copy its name · drag a node to
+    activity: an unselected object type involved in these events · double click on an activity: deselect it · right click on an activity: copy its name · drag a node to
     move it (the arcs follow; positions reset when a setting changes)
   </Text>
 );
@@ -219,7 +211,7 @@ const EDGE_TYPES = { arc: ArcEdge };
 const strokeWidth = (count: number, max: number) => 1.2 + 2.8 * Math.sqrt(count / Math.max(max, 1));
 
 /** React Flow nodes and edges of a layout. */
-const toFlow = (layout: Layout, colours: Map<string, string>, onRemove?: (arc: LaidOutArc) => void) => {
+const toFlow = (layout: Layout, colours: Map<string, string>) => {
   const maxCount = new Map<string, number>();
   for (const a of layout.arcs) maxCount.set(a.objectType, Math.max(maxCount.get(a.objectType) ?? 0, a.count));
   const nodes: Node<NodeData>[] = layout.nodes.map((n) => ({
@@ -239,7 +231,7 @@ const toFlow = (layout: Layout, colours: Map<string, string>, onRemove?: (arc: L
       source: a.source,
       target: a.target,
       type: "arc",
-      data: { ...a, colour, width: strokeWidth(a.count, maxCount.get(a.objectType) ?? 1), onRemove },
+      data: { ...a, colour, width: strokeWidth(a.count, maxCount.get(a.objectType) ?? 1) },
       // React Flow draws the arrow in a 20-unit box of which it fills 5: 30 px gives an arrow of about 8 px, whatever the stroke width.
       markerEnd: { type: MarkerType.ArrowClosed, color: colour, width: 30, height: 30, markerUnits: "userSpaceOnUse" },
     };
@@ -292,7 +284,7 @@ const followNodes = (edges: Edge<ArcData>[], offsets: Map<string, Offset>) =>
     };
   });
 
-/** Fit the view whenever a new layout arrives (not when a layout is only reduced, so the view stays where it is). */
+/** Fit the view whenever a new layout arrives. */
 const FitOnChange = ({ generation }: { generation: number | null }) => {
   const { fitView } = useReactFlow();
   useEffect(() => {
@@ -310,10 +302,7 @@ const FitOnChange = ({ generation }: { generation: number | null }) => {
  * @param arcLabel What the arc labels show: traversals (`count`) or distinct objects.
  * @param compact Compact layout (little white space, `COMPACT_OPTIONS`).
  * @param height Height of the drawing area in pixels.
- * @param onRemoveArc Called when the user double-clicks an arc (to remove it).
  * @param onDeselectActivity Called when the user double-clicks an activity node (to deselect it for all types).
- * @param keepLayout Reuse the current layout if the new graph only lacks arcs (`reduceLayout`; set when only arcs were
- *   removed by hand, Nina 2026-11-17): nodes and arcs stay where they are, dragged nodes too.
  */
 export const DfgGraph = ({
   graph,
@@ -322,9 +311,7 @@ export const DfgGraph = ({
   arcLabel,
   compact,
   height,
-  onRemoveArc,
   onDeselectActivity,
-  keepLayout = false,
 }: {
   graph: DirectlyFollowsGraph;
   colours: Map<string, string>;
@@ -332,9 +319,7 @@ export const DfgGraph = ({
   arcLabel: ArcLabel;
   compact: boolean;
   height: number;
-  onRemoveArc?: (arc: LaidOutArc) => void;
   onDeselectActivity?: (activity: string) => void;
-  keepLayout?: boolean;
 }) => {
   const [layout, setLayout] = useState<Layout | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -342,16 +327,6 @@ export const DfgGraph = ({
   useEffect(() => {
     let cancelled = false;
     setError(null);
-    // Only arcs removed (same look settings): drop them from the current layout instead of a new ELK run.
-    const previous = current.current;
-    if (keepLayout && previous?.layout && previous.direction === direction && previous.arcLabel === arcLabel && previous.compact === compact) {
-      const reduced = reduceLayout(previous.layout, graph);
-      if (reduced) {
-        current.current = { layout: reduced, direction, arcLabel, compact };
-        setLayout(reduced);
-        return;
-      }
-    }
     layoutGraph(graph, direction, arcLabel, compact).then(
       (result) => {
         if (cancelled) return;
@@ -363,12 +338,10 @@ export const DfgGraph = ({
     return () => {
       cancelled = true;
     };
-    // keepLayout is read when the graph changes, not a reason to lay out again.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph, direction, arcLabel, compact]);
-  const flow = useMemo(() => (layout ? toFlow(layout, colours, onRemoveArc) : null), [layout, colours, onRemoveArc]);
+  const flow = useMemo(() => (layout ? toFlow(layout, colours) : null), [layout, colours]);
   // Dragged node positions, kept per layout generation: a new ELK run (a setting changed) starts from its own
-  // positions; a reduced layout (arcs removed by hand) keeps them.
+  // positions.
   const generation = layout?.generation ?? null;
   const [dragged, setDragged] = useState<{ generation: number | null; nodes: Map<string, Node<NodeData>> }>({
     generation: null,
@@ -409,7 +382,7 @@ export const DfgGraph = ({
   if (error) return <Alert color="red">Layout failed: {error}</Alert>;
   if (!flow) return <Loader size="sm" />;
   if (flow.nodes.length === 0)
-    return <Alert color="gray">Nothing to show: select an object type, raise its variant or arc threshold, or restore removed arcs.</Alert>;
+    return <Alert color="gray">Nothing to show: select an object type, or raise its variant or arc threshold.</Alert>;
   return (
     <Stack gap={4}>
       <Legend />
@@ -438,12 +411,6 @@ export const DfgGraph = ({
           maxZoom={3}
           fitView
           fitViewOptions={{ padding: 0.08, maxZoom: 1 }}
-          // Double click removes an arc (Nina, 2026-11-20; before: right click); a single click stays free.
-          onEdgeDoubleClick={(event, edge) => {
-            event.preventDefault();
-            const data = edge.data as ArcData | undefined;
-            if (data) onRemoveArc?.(data);
-          }}
           // Double click on an activity deselects it for every object type (Nina, 2026-11-19); no zoom on double click.
           zoomOnDoubleClick={false}
           onNodeDoubleClick={(event, node) => {

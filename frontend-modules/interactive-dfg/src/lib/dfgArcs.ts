@@ -1,9 +1,8 @@
-// Steps 4 and 5 of the directly-follows graph, in the browser so that the arc sliders, the arc removal (double click) and
-// "Stay connected" react without a request (Nina, 2026-11-15): arc threshold, arc count, arcs removed by hand and the
-// connectivity repair. The backend sends all arcs of the included traces (projected, variant-filtered), each with its
+// Steps 4 and 5 of the directly-follows graph, in the browser so that the arc sliders and "Stay connected" react
+// without a request (Nina, 2026-11-15): arc threshold, arc count and the connectivity repair. The backend sends all arcs of the included traces (projected, variant-filtered), each with its
 // `rank` in the arc ranking of its type; these functions mirror `dfg/arcs.py` and `dfg/connectivity.py` exactly (the
 // Python versions stay for the notebook and the tests; `tests/test_dfg_frontend.py` checks that both agree).
-// Documented in docs/pages/directly-follows-graph.md. Plain TypeScript without imports, so that Node can run it.
+// Documented in docs/pages/interactive-dfg.md. Plain TypeScript without imports, so that Node can run it.
 
 /** An arc as sent by the backend (null source / target = start / end node of the object type). */
 export type BaseArc = {
@@ -17,9 +16,6 @@ export type BaseArc = {
   connecting?: boolean;
 };
 
-/** An arc, identified by its object type and endpoints. */
-export type ArcId = { object_type: string; source: string | null; target: string | null };
-
 /** The arc settings of the page. */
 export type ArcSettings = {
   /** Arc threshold in percent (0 to 100) of an object type. */
@@ -28,8 +24,6 @@ export type ArcSettings = {
   count: (objectType: string) => number | null;
   /** Arcs (display) in "general" mode: one limit for the arcs of all types without an own count together; null = none. */
   total?: number | null;
-  /** Arcs removed by hand. */
-  removed: ArcId[];
   /** Every shown arc lies on a start-to-end path. */
   stayConnected: boolean;
 };
@@ -141,12 +135,6 @@ export const neededArcThresholds = (arcs: BaseArc[], decimals = 0): Map<string, 
   return result;
 };
 
-/** Removes the arcs removed by hand (`arcs.remove_arcs`). */
-export const removeArcs = <T extends BaseArc>(arcs: T[], removed: ArcId[]): T[] => {
-  const keys = new Set(removed.map(arcKey));
-  return arcs.filter((a) => !keys.has(arcKey(a)));
-};
-
 const START = "\u0000start";
 const END = "\u0000end";
 /** Graph nodes of an arc: the start / end sentinel for a null source / target. */
@@ -189,8 +177,8 @@ export const onStartEndPaths = <T extends BaseArc>(arcs: T[]): T[] => {
  * base arcs that lie on a start-to-end path, every arc not in `kept` is taken out, least frequent first (highest rank
  * first), unless this cuts an activity of the kept arcs off from the start or the end node.
  *
- * @param base All arcs of the included traces without the arcs removed by hand.
- * @param kept The arcs left by the arc threshold, the arc count and the hand removals.
+ * @param base All arcs of the included traces.
+ * @param kept The arcs left by the arc threshold and the arc count.
  * @returns The shown arcs, ordered by type and rank, with `connecting` = true for the added ones.
  */
 export const stayConnected = <T extends BaseArc>(base: T[], kept: T[]): (T & { connecting: boolean })[] => {
@@ -214,7 +202,7 @@ export const stayConnected = <T extends BaseArc>(base: T[], kept: T[]): (T & { c
 };
 
 /**
- * Steps 4 and 5 together: arc threshold, arc count, hand removals, then (if on) "Stay connected".
+ * Steps 4 and 5 together: arc threshold, arc count, then (if on) "Stay connected".
  *
  * @param arcs All arcs of the included traces (from the backend, with `rank`).
  * @param settings The arc settings.
@@ -222,9 +210,9 @@ export const stayConnected = <T extends BaseArc>(base: T[], kept: T[]): (T & { c
  */
 export const filterArcs = <T extends BaseArc>(arcs: T[], settings: ArcSettings) => {
   const threshold = arcShareFilter(arcs, settings.threshold);
-  const kept = removeArcs(arcCountFilter(threshold, settings.count, settings.total), settings.removed);
+  const kept = arcCountFilter(threshold, settings.count, settings.total);
   const shown = settings.stayConnected
-    ? stayConnected(removeArcs(arcs, settings.removed), kept)
+    ? stayConnected(arcs, kept)
     : kept.map((a) => ({ ...a, connecting: false }));
   return { shown, threshold };
 };

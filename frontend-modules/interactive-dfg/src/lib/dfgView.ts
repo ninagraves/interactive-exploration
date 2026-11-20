@@ -1,7 +1,7 @@
 // The graph the page draws: the backend's graph (all arcs of the included traces) with the arc settings applied in
-// the browser (lib/dfgArcs.ts). Documented in docs/pages/directly-follows-graph.md.
+// the browser (lib/dfgArcs.ts). Documented in docs/pages/interactive-dfg.md.
 import type { DfgArc, DirectlyFollowsGraph } from "../api/interactiveDfg";
-import { type ArcSettings, arcKey, filterArcs } from "./dfgArcs";
+import { type ArcSettings, filterArcs } from "./dfgArcs";
 
 /** Number of arcs per object type. */
 const perType = (arcs: { object_type: string }[]) => {
@@ -13,7 +13,7 @@ const perType = (arcs: { object_type: string }[]) => {
 /**
  * Apply the arc settings to the backend's graph: the shown arcs (with `connecting`), the activities they touch, and
  * per selected object type the arc threshold and count used and the numbers of arcs (all, left by the threshold,
- * shown); `arc_count_max` (most arcs of one type left by the threshold) and `removed_arcs` (with their counts).
+ * shown) and `arc_count_max` (most arcs of one type left by the threshold).
  *
  * @param graph The backend's graph (`arcs` = all arcs of the included traces, with `rank`).
  * @param settings The arc settings (`arcSettings` of the page state).
@@ -25,7 +25,6 @@ export const applyArcSettings = (graph: DirectlyFollowsGraph, settings: ArcSetti
   const all = perType(graph.arcs);
   const left = perType(threshold);
   const drawn = perType(shown);
-  const removed = new Set(settings.removed.map(arcKey));
   return {
     ...graph,
     arcs: shown as DfgArc[],
@@ -43,7 +42,6 @@ export const applyArcSettings = (graph: DirectlyFollowsGraph, settings: ArcSetti
         : t,
     ),
     arc_count_max: Math.max(0, ...left.values()),
-    removed_arcs: graph.arcs.filter((a) => removed.has(arcKey(a))),
   };
 };
 

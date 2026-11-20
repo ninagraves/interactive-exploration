@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import polars as pl
 import pytest
 
+from ocelescope_module_interactive_dfg.dfg.export import kept_event_ids
 from ocelescope_module_interactive_dfg.dfg.projection import default_activity_count
 from ocelescope_module_interactive_dfg.dfg.variants import activity_variant_thresholds, object_variants, variant_ranking
 from ocelescope_module_interactive_dfg.dfg.graph import (
@@ -14,6 +15,7 @@ from ocelescope_module_interactive_dfg.dfg.graph import (
     LogFrames,
     TypeSetting,
     directly_follows_graph,
+    included_traces,
     TypeThresholds,
     log_frames,
     resolve_selection,
@@ -163,18 +165,6 @@ def test_stay_connected_adds_back_the_arcs_needed_for_start_to_end_paths(frames)
     assert [(a.source, a.target) for a in directly_follows_graph(frames, selection, activities=every, stay=False).arcs] == [(None, "cast slab")]
 
 
-def test_arcs_removed_by_hand_stay_removed(frames):
-    # Removing inspect slab -> roll cuts the slab's only path: with "Stay connected" no arc is left (no arc lies on a
-    # start-to-end path), without it the other three arcs stay.
-    every = every_activity(frames, "slab")
-    selection = full("slab")
-    removed = [("slab", "inspect slab", "roll")]
-    assert directly_follows_graph(frames, selection, activities=every, removed=removed).arcs == []
-    graph = directly_follows_graph(frames, selection, activities=every, stay=False, removed=removed)
-    assert len(graph.arcs) == 3
-    assert [(a.source, a.target, a.count) for a in graph.removed_arcs] == [("inspect slab", "roll", 1)]
-
-
 def test_deselected_activity_is_projected_out_first(frames):
     # Projection (Nina, 2026-11-15): without label, the coils' traces roll, label, crane move become roll, crane move.
     activities = every_activity(frames, "coil", "slab")
@@ -260,7 +250,7 @@ def test_request_resolves_general_and_own_thresholds(frames):
 
 
 def _pallet_example() -> LogFrames:
-    """The worked example of the module note "Interactive DFG Module" (the one of the location module's DFG page):
+    """The running example of the concept note "Interactive DFG" and the module note "Interactive DFG Module":
     ten pallets, a truck and an operator."""
     paths = {
         **{f"p{i}": ["produce", "pick", "pack", "load", "ship"] for i in range(1, 6)},
@@ -290,7 +280,8 @@ def _pallet_example() -> LogFrames:
     )
 
 
-def test_worked_example_of_the_module_note():
+def test_pallet_example_with_all_activities():
+    """The running example with only pallet selected and all its activities (no projection)."""
     frames = _pallet_example()
     p9 = selected_traces(frames, ["pallet"]).filter(pl.col("object") == "p9")
     # Ties by activity name: "inspect" < "produce" at the first timestamp, "inspect" < "scrap" at the last.
@@ -319,11 +310,6 @@ def test_worked_example_of_the_module_note():
     assert set(arcs_of(graph, "pallet")) == {(None, "produce"), ("produce", "pick"), ("pack", "load")}
     graph = directly_follows_graph(frames, pallet(arc_count=3), activities=every)
     assert {(a.source, a.target) for a in graph.arcs if a.connecting} == {("pick", "pack"), ("load", "ship"), ("ship", None)}
-    # Arcs 70 % and PI -> PA removed by hand: Stay connected adds PI -> IN and IN -> PA back instead.
-    removed = [("pallet", "pick", "pack")]
-    graph = directly_follows_graph(frames, pallet(arc_threshold=70), activities=every, removed=removed)
-    assert {(a.source, a.target) for a in graph.arcs if a.connecting} == {("pick", "inspect"), ("inspect", "pack")}
-    assert ("pick", "pack") not in arcs_of(graph, "pallet")
     # IN deselected: projected out before the variants, so p6-p8 have the variant of p1-p5 (8 pallets).
     no_inspect = {"pallet": [a for a in every["pallet"] if a != "inspect"]}
     graph = directly_follows_graph(frames, pallet(), activities=no_inspect)
@@ -474,3 +460,91 @@ def test_defaults_of_the_module_note():
     events = {a.activity: a.events for a in graph.activities}
     assert events == {"produce": 8, "pick": 8, "pack": 8, "inspect": 6, "load": 9, "ship": 9}
     assert (options["scrap"].on_included_trace, options["scrap"].variant_threshold_needed) == (False, 81)
+
+
+def _shown(graph):
+    """Shown arcs as {(object type, source, target): (traversals, objects, connecting)}."""
+    return {(a.object_type, a.source, a.target): (a.count, a.objects, a.connecting) for a in graph.arcs}
+
+
+def test_general_example_of_the_concept_note():
+    """Concept note "Interactive DFG", running example with general settings: S = {pallet}, A' = A without pack,
+    pi = 60, alpha = 50, N = infinity, stay connected."""
+    frames = _pallet_example()
+    no_pack = [a for a in every_activity(frames, "pallet")["pallet"] if a != "pack"]
+    setting = [TypeSetting(object_type="pallet", variant_threshold=60, arc_threshold=50)]
+    graph = directly_follows_graph(frames, setting, activities={"pallet": no_pack})
+    t = next(t for t in graph.object_types if t.object_type == "pallet")
+    # Variants PR,PI,LO,SH (5), PR,PI,IN,LO,SH (4: p6-p8 and p10), IN,PR,IN,SC (p9); 60 % of 10 = 6: two kept.
+    assert (t.variants, t.kept_variants, t.kept_objects, t.arcs, t.threshold_arcs) == (3, 2, 9, 7, 4)
+    assert _shown(graph) == {
+        ("pallet", None, "produce"): (9, 9, False),
+        ("pallet", "produce", "pick"): (9, 9, False),
+        ("pallet", "load", "ship"): (9, 9, False),
+        ("pallet", "ship", None): (9, 9, False),
+        ("pallet", "pick", "load"): (5, 5, True),
+    }
+    selected = {t.object_type for t in graph.object_types if t.selected}
+    # Circles: the involved object types that are not selected.
+    nodes = {
+        a.activity: (a.events, [(x.object_type, x.events, x.objects) for x in a.object_types if x.object_type not in selected])
+        for a in graph.activities
+    }
+    assert nodes == {
+        "produce": (9, []),
+        "pick": (9, []),
+        "load": (9, [("truck", 9, 1)]),
+        "ship": (9, [("truck", 9, 1)]),
+    }
+    loose = directly_follows_graph(frames, setting, activities={"pallet": no_pack}, stay=False)
+    assert len(loose.arcs) == 4
+    # Arcs (display) N = 3 (general): start -> PR, PR -> PI, LO -> SH; Stay connected adds SH -> end and PI -> LO.
+    counted = directly_follows_graph(frames, setting, activities={"pallet": no_pack}, arc_total=3)
+    assert {k for k, v in _shown(counted).items() if not v[2]} == {
+        ("pallet", None, "produce"), ("pallet", "produce", "pick"), ("pallet", "load", "ship")
+    }
+    assert {k for k, v in _shown(counted).items() if v[2]} == {("pallet", "ship", None), ("pallet", "pick", "load")}
+    # Save to session, Log: projected = the 40 events of the included traces, displayed = without the 4 inspect events.
+    steps = included_traces(frames, setting, None, {"pallet": no_pack})
+    assert len(kept_event_ids(steps.kept)) == 40
+    assert len(kept_event_ids(steps.kept, [a.activity for a in graph.activities])) == 36
+
+
+def test_type_specific_example_of_the_concept_note():
+    """Concept note "Interactive DFG", running example with object-type-specific settings: pallet (pi 60, alpha 100,
+    PR, PI, PA, IN) and truck (pi 100, alpha 50, LO, SH)."""
+    frames = _pallet_example()
+    setting = [
+        TypeSetting(object_type="pallet", variant_threshold=60, arc_threshold=100),
+        TypeSetting(object_type="truck", variant_threshold=100, arc_threshold=50),
+    ]
+    activities = {"pallet": ["produce", "pick", "pack", "inspect"], "truck": ["load", "ship"]}
+    graph = directly_follows_graph(frames, setting, activities=activities)
+    types = {t.object_type: (t.variants, t.kept_variants, t.kept_objects, t.arcs, t.threshold_arcs) for t in graph.object_types if t.selected}
+    assert types == {"pallet": (4, 2, 8, 6, 6), "truck": (1, 1, 1, 4, 2)}
+    assert _shown(graph) == {
+        ("pallet", None, "produce"): (8, 8, False),
+        ("pallet", "produce", "pick"): (8, 8, False),
+        ("pallet", "pack", None): (8, 8, False),
+        ("pallet", "pick", "pack"): (5, 5, False),
+        ("pallet", "pick", "inspect"): (3, 3, False),
+        ("pallet", "inspect", "pack"): (3, 3, False),
+        ("truck", "load", "ship"): (9, 1, False),
+        ("truck", "ship", "load"): (8, 1, False),
+        ("truck", None, "load"): (1, 1, True),
+        ("truck", "ship", None): (1, 1, True),
+    }
+    selected = {t.object_type for t in graph.object_types if t.selected}
+    # Circles: the involved object types that are not selected.
+    nodes = {
+        a.activity: (a.events, [(x.object_type, x.events, x.objects) for x in a.object_types if x.object_type not in selected])
+        for a in graph.activities
+    }
+    assert nodes == {
+        "produce": (8, []),
+        "pick": (8, []),
+        "pack": (8, []),
+        "inspect": (3, [("operator", 3, 1)]),
+        "load": (9, []),
+        "ship": (9, []),
+    }

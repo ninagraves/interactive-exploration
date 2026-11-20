@@ -1,7 +1,7 @@
 """"Save to session" of the page: the model or the log, projected or as displayed.
 
 - **Model**: Ocelescope's `DirectlyFollowsGraph` resource (`dfg_resource`) of the arcs the page sends: projected = the
-  graph with Arcs (display) at "all" and no arcs removed by hand (Stay connected as set); displayed = the arcs as drawn.
+  graph with Arcs (display) at "all" (Stay connected as set); displayed = the arcs as drawn.
 - **Log**: a new OCEL with the events of the included traces (`kept_event_ids`; after the activity projection and the
   variant filter), cut from the log by `filtered_log`; displayed = also without the events
   of activities that are not drawn. An event log has no arcs, so arcs hidden between two drawn activities stay in it.

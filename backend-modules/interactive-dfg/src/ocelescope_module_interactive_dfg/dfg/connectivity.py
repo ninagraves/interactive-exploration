@@ -2,12 +2,11 @@
 
 As the repair in `filter_edges` of Ocelescope's `DirectlyFollowsGraph`: every shown arc lies on a path from the
 start to the end node of its object type. It overrides the arc threshold, the arc count and nothing else: it may
-add back arcs that these two removed, but never arcs of removed variants, of deselected activities, or arcs the
-user removed by hand.
+add back arcs that these two removed, but never arcs of removed variants or of deselected activities.
 
 Per object type:
-1. Base graph: the arcs of the kept (projected, variant-filtered) traces, without the arcs removed by hand,
-   reduced to the arcs that still lie on a start-to-end path (removing arcs by hand can cut others off).
+1. Base graph: the arcs of the kept (projected, variant-filtered) traces (every one of them lies on a
+   start-to-end path, the path of an object that traverses it).
 2. Required activities: the endpoints of the arcs left by the arc threshold and arc count (and in the base graph).
 3. Every base arc that the sliders removed is taken out again, least frequent first (reverse `arcs.arc_order`),
    unless this would cut a required activity off from the start or the end node; then it stays.
@@ -58,8 +57,8 @@ def stay_connected(base: pl.DataFrame, kept: pl.DataFrame) -> pl.DataFrame:
     """Add back the fewest, most frequent arcs of `base` so that every arc lies on a start-to-end path.
 
     Args:
-        base: Arcs of the kept traces without the hand-removed arcs (`arcs.remove_arcs`).
-        kept: Arcs left by the arc threshold, the arc count and the hand removals (a subset of `base`).
+        base: Arcs of the kept traces (`arcs.directly_follows_arcs`).
+        kept: Arcs left by the arc threshold and the arc count (a subset of `base`).
 
     Returns:
         pl.DataFrame: The shown arcs (columns of `base` plus `connecting`), sorted by `arcs.arc_order`.

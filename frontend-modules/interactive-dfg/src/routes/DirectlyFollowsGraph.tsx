@@ -4,15 +4,14 @@
 // Documented in docs/pages/interactive-dfg.md.
 import { Alert, Box, Group, Loader, Stack } from "@mantine/core";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { type DfgActivityOption, getDirectlyFollowsGraph } from "../api/interactiveDfg";
 import { DfgGraph } from "../components/DfgGraph";
-import { arcSettings, DEFAULT_STATE, DfgSettings, type DfgState, removeArc, toRequest } from "../components/DfgSettings";
+import { arcSettings, DEFAULT_STATE, DfgSettings, type DfgState, toRequest } from "../components/DfgSettings";
 import { DfgSave } from "../components/DfgSave";
 import { DfgToolbar } from "../components/DfgToolbar";
 import { applyArcSettings, DEFAULT_OBJECT_TYPES, pendingSelection } from "../lib/dfgView";
 import { useDebounced } from "../lib/useDebounced";
-import type { LaidOutArc } from "../lib/dfgLayout";
 import { ModulePage } from "../components/ModulePage";
 import { useScheme } from "../lib/scheme";
 import { errorText } from "../lib/errors";
@@ -26,21 +25,6 @@ const GRAPH_HEIGHT = { initial: 760, min: 300, max: 4000 };
 
 /** Waiting time after the last change of a setting before the graph is recalculated. */
 const RECALCULATION_DELAY_MS = 2000;
-
-/**
- * True if two states differ only by more arcs removed by hand (`b` removes all arcs that `a` removes, and more).
- *
- * @param a The earlier state.
- * @param b The later state.
- */
-const onlyRemovedDiffers = (a: DfgState, b: DfgState) => {
-  if (a === b || b.removed.length <= a.removed.length) return false;
-  const key = (r: DfgState["removed"][number]) => JSON.stringify([r.object_type, r.source, r.target]);
-  const later = new Set(b.removed.map(key));
-  return (
-    a.removed.every((r) => later.has(key(r))) && JSON.stringify({ ...a, removed: [] }) === JSON.stringify({ ...b, removed: [] })
-  );
-};
 
 /** Width and visibility of the sidebar (one for all logs). */
 type SidebarState = { width: number; hidden: boolean };
@@ -151,16 +135,6 @@ const DfgContent = ({ ocelId }: { ocelId: string }) => {
   const [sidebar, setSidebar] = usePageState<SidebarState>("dfg.sidebar", { width: SIDEBAR_WIDTH.initial, hidden: false });
   const [height, setHeight] = usePageState<number>("dfg.height", GRAPH_HEIGHT.initial);
   const scheme = useScheme();
-  // Double click on an arc removes it, at once and without a new layout if nothing else waits: it only takes arcs out,
-  // in the browser.
-  const removeNow = useRef(false);
-  const onRemoveArc = useCallback(
-    (arc: LaidOutArc) => {
-      removeNow.current = true;
-      setState((s) => removeArc(s, { object_type: arc.objectType, source: arc.sourceActivity, target: arc.targetActivity }));
-    },
-    [setState],
-  );
   // Double click on an activity node deselects it for every object type; applied after the usual 2 s wait, like a
   // checkbox in the sidebar.
   const options = useRef<DfgActivityOption[]>([]);
@@ -171,25 +145,13 @@ const DfgContent = ({ ocelId }: { ocelId: string }) => {
   // The graph follows the settings 2 s after the last change, so that several can be changed first; the controls show
   // the new values at once. "Update now" in the toolbar skips the wait.
   const [applied, pending, applyNow] = useDebounced(state, RECALCULATION_DELAY_MS);
-  const lastApplied = useRef(applied);
-  useEffect(() => {
-    if (!removeNow.current) return;
-    removeNow.current = false;
-    // Apply a removal at once only if it is the only change waiting.
-    if (onlyRemovedDiffers(lastApplied.current, state)) applyNow();
-  }, [state, applyNow]);
-  // Only arcs removed by hand changed since the last drawing: keep the layout (`DfgGraph`, `keepLayout`).
-  const keepLayout = useMemo(() => onlyRemovedDiffers(lastApplied.current, applied), [applied]);
-  useEffect(() => {
-    lastApplied.current = applied;
-  }, [applied]);
   const request = useMemo(() => toRequest(applied), [applied]);
   const { data: base, error, isFetching } = useQuery({
     queryKey: ["interactiveDfg", "dfg", ocelId, request],
     queryFn: ({ signal }) => getDirectlyFollowsGraph(ocelId, request, undefined, undefined, signal),
     placeholderData: keepPreviousData,
   });
-  // Arc threshold, arc count, removed arcs and Stay connected: in the browser, without a request.
+  // Arc threshold, arc count and Stay connected: in the browser, without a request.
   const arcs = useMemo(() => arcSettings(applied), [applied]);
   const data = useMemo(() => (base ? applyArcSettings(base, arcs) : undefined), [base, arcs]);
   options.current = data?.activity_options ?? [];
@@ -228,9 +190,7 @@ const DfgContent = ({ ocelId }: { ocelId: string }) => {
             arcLabel={applied.arcLabel}
             compact={applied.compact}
             height={height}
-            onRemoveArc={onRemoveArc}
             onDeselectActivity={onDeselectActivity}
-            keepLayout={keepLayout}
           />
           <HeightHandle height={height} onChange={setHeight} />
         </Box>

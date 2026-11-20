@@ -19,36 +19,34 @@ DFG_ARCS = Path(__file__).parents[3] / "frontend-modules" / "interactive-dfg" / 
 RUNNER = """
 const { filterArcs } = await import(process.argv[2]);
 const cases = JSON.parse(await new Promise((ok) => { let s = ""; process.stdin.on("data", (d) => (s += d)); process.stdin.on("end", () => ok(s)); }));
-const out = cases.map(({ arcs, threshold, count, total, removed, stay }) =>
+const out = cases.map(({ arcs, threshold, count, total, stay }) =>
   filterArcs(arcs, {
     threshold: (t) => threshold[t] ?? 100,
     count: (t) => count[t] ?? null,
     total,
-    removed,
     stayConnected: stay,
   }).shown.map((a) => [a.object_type, a.source ?? null, a.target ?? null, a.connecting]),
 );
 console.log(JSON.stringify(out));
 """
 
-#: (variant threshold, arc threshold, arc count, removed arcs, stay connected[, total]) of the pallets (and, with
+#: (variant threshold, arc threshold, arc count, stay connected[, total]) of the pallets (and, with
 #: total, trucks) in the worked example; total = Arcs (display) in "general" mode.
 CASES = [
-    (60, 100, None, [], True),
-    (60, 70, None, [], True),
-    (60, 50, None, [], False),
-    (60, 50, None, [], True),
-    (60, 100, 3, [], False),
-    (60, 100, 3, [], True),
-    (60, 70, None, [("pallet", "pick", "pack")], True),
-    (60, 70, None, [("pallet", "pick", "pack")], False),
-    (100, 30, 4, [("pallet", "produce", "inspect")], True),
-    (100, 0, None, [], True),
-    (100, 12.5, 2, [], True),
-    (100, 100, None, [], False, 5),
-    (100, 100, None, [], True, 5),
-    (100, 50, None, [("pallet", "pick", "pack")], False, 3),
-    (100, 100, 2, [], False, 4),
+    (60, 100, None, True),
+    (60, 70, None, True),
+    (60, 50, None, False),
+    (60, 50, None, True),
+    (60, 100, 3, False),
+    (60, 100, 3, True),
+    (100, 30, 4, True),
+    (100, 0, None, True),
+    (100, 12.5, 2, True),
+    (100, 100, None, False, 5),
+    (100, 100, None, True, 5),
+    (100, 50, None, False, 3),
+    (100, 50, None, True, 3),
+    (100, 100, 2, False, 4),
 ]
 
 
@@ -68,7 +66,7 @@ def test_frontend_arc_settings_match_python(tmp_path):
     frames = _pallet_example()
     every = every_activity(frames, "pallet", "truck")
     inputs, expected = [], []
-    for variants, threshold, count, removed, stay, *rest in CASES:
+    for variants, threshold, count, stay, *rest in CASES:
         total = rest[0] if rest else None
         # With total: pallets and trucks, the pallets with their own count (if any), the trucks pooled.
         types = ["pallet", "truck"] if total is not None else ["pallet"]
@@ -80,7 +78,6 @@ def test_frontend_arc_settings_match_python(tmp_path):
                 "threshold": {t: threshold for t in types},
                 "count": {"pallet": count} if count is not None else {},
                 "total": total,
-                "removed": [{"object_type": t, "source": s, "target": g} for t, s, g in removed],
                 "stay": stay,
             }
         )
@@ -88,7 +85,7 @@ def test_frontend_arc_settings_match_python(tmp_path):
             TypeSetting(object_type=t, variant_threshold=variants, arc_threshold=threshold, arc_count=count if t == "pallet" else None)
             for t in types
         ]
-        graph = directly_follows_graph(frames, setting, activities=every, stay=stay, removed=removed, arc_total=total)
+        graph = directly_follows_graph(frames, setting, activities=every, stay=stay, arc_total=total)
         expected.append(sorted([a.object_type, a.source or "", a.target or "", a.connecting] for a in graph.arcs))
     runner = tmp_path / "runner.mjs"
     runner.write_text(RUNNER)

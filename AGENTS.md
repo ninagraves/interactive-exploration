@@ -4,7 +4,6 @@ Read this before changing anything in this repository.
 
 ## What this is
 An Ocelescope module (FastAPI backend + React frontend) with an interactive object-centric directly-follows graph for any OCEL.
-It is the domain-free generalisation of the directly-follows graph page of the location-based OCPM module (repository location-based-ocpm).
 The concept is defined by Nina Graves outside this repo (conceptualisation notes of the subproject "interactive_DFG"); the implementation follows it.
 
 ## Working rules

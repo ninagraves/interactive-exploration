@@ -57,7 +57,7 @@ def type_activity_counts(e2o: FrameLike, events: FrameLike, objects: FrameLike) 
 def selected_type_event_counts(e2o: FrameLike, events: FrameLike, objects: FrameLike, object_types: Collection[str]) -> dict[str, int]:
     """Events per activity that involve at least one object of the selected object types.
 
-    Shown in brackets in the activity list (the location module counts the events with a handling unit here).
+    Shown in brackets in the activity list.
     Example: pallets selected, "refuel" only involves trucks: 0.
 
     Args:
@@ -110,7 +110,7 @@ def default_activities(
     Args:
         counts: `type_activity_counts` (sorted: most events first, ties by first occurrence, then name).
         object_types: The object types to preselect for.
-        shared_from: The types whose own defaults are shared with all (the location module passes its selected handling-unit types).
+        shared_from: The types whose own defaults are shared with all (e.g. types that should share their defaults).
 
     Returns:
         dict[str, list[str]]: Object type -> preselected activities, in the type's frequency order.

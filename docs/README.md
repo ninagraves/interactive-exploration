@@ -20,5 +20,5 @@ Goal: another developer or coding agent can take over without further context.
 Covers what exists, where it is, how to run and change it; no per-function detail beyond docstrings.
 
 ## Example logs
-- `data/running_example/running_example.sqlite`: the running example of the location-based OCPM project (one slab, five coils, 17 events), a copy.
+- `data/running_example/running_example.sqlite`: a small example log (one slab, five coils, 17 events).
 - The pallet example (ten pallets, a truck, an operator) is built in `tests/test_dfg.py` (`_pallet_example`); the module note's worked example uses it.

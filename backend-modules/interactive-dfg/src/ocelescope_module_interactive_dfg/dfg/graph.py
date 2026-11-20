@@ -21,7 +21,6 @@ from .arcs import (
     arcs_per_type,
     directly_follows_arcs,
     objects_per_type,
-    remove_arcs,
 )
 from .connectivity import CONNECTING, stay_connected
 from .nodes import activity_frequencies, involved_object_types, shown_activities
@@ -38,9 +37,9 @@ from .variants import (
 
 #: Number of object types selected by default: the ones with the most objects (Nina, 2026-11-20).
 DEFAULT_OBJECT_TYPES = 5
-#: Default arc threshold ("Arcs (projection)") in percent (as in the location module).
+#: Default arc threshold ("Arcs (projection)") in percent.
 DEFAULT_ARC_THRESHOLD = 50.0
-#: Default variant threshold in percent, for all selected types (as in the location module).
+#: Default variant threshold in percent, for all selected types.
 DEFAULT_VARIANT_THRESHOLD = 80.0
 #: Default of "Stay connected".
 DEFAULT_STAY_CONNECTED = True
@@ -79,24 +78,10 @@ class TypeThresholds(BaseModel):
     arc_count: int | None = Field(None, ge=0)
 
 
-class ArcKey(BaseModel):
-    """An arc, identified by its object type and endpoints.
-
-    Attributes:
-        object_type: The object type.
-        source: Source activity; None = the start node of the object type.
-        target: Target activity; None = the end node of the object type.
-    """
-
-    object_type: str
-    source: str | None = None
-    target: str | None = None
-
-
 class DfgRequest(BaseModel):
     """Settings of the page (sidebar) that need the backend: object types, variants, activities.
 
-    The page applies the arc settings (arc threshold, arc count, arcs removed by hand, Stay connected) itself, in the
+    The page applies the arc settings (arc threshold, arc count, Stay connected) itself, in the
     browser (`frontend-modules/interactive-dfg/src/lib/dfgArcs.ts`): the route answers with all arcs
     of the included traces. The arc fields below are for use from Python (`resolve_selection`, notebooks) and ignored
     by the route.
@@ -113,7 +98,6 @@ class DfgRequest(BaseModel):
             are removed from the type's traces first. A type that is missing gets the default
             (`projection.default_activities`).
         stay_connected: Connectivity repair on (`connectivity.stay_connected`).
-        removed_arcs: Arcs removed by hand (double click on the arc).
     """
 
     object_types: list[str] | None = None
@@ -123,7 +107,6 @@ class DfgRequest(BaseModel):
     type_thresholds: list[TypeThresholds] = Field(default_factory=list)
     activities: dict[str, list[str]] = Field(default_factory=dict)
     stay_connected: bool = DEFAULT_STAY_CONNECTED
-    removed_arcs: list[ArcKey] = Field(default_factory=list)
 
 
 class DfgObjectType(BaseModel):
@@ -276,7 +259,6 @@ class DirectlyFollowsGraph(BaseModel):
         activity_options: All activities of the log, most events first, for the activity selection.
         variant_default: The default variant threshold of the selection (percent).
         arc_count_max: Largest number of arcs of one selected type left by the arc threshold (slider maximum).
-        removed_arcs: The arcs removed by hand that exist in the current graph's traces, with their counts.
     """
 
     object_types: list[DfgObjectType]
@@ -285,7 +267,6 @@ class DirectlyFollowsGraph(BaseModel):
     activity_options: list[DfgActivityOption]
     variant_default: float = DEFAULT_VARIANT_THRESHOLD
     arc_count_max: int = 0
-    removed_arcs: list[DfgArc] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -462,13 +443,12 @@ def directly_follows_graph(
     traces: pl.DataFrame | None = None,
     activities: Mapping[str, Collection[str]] | None = None,
     stay: bool = DEFAULT_STAY_CONNECTED,
-    removed: Collection[tuple[str, str | None, str | None]] = (),
     arc_total: int | None = None,
 ) -> DirectlyFollowsGraph:
     """The directly-follows graph of the selected object types.
 
     Order of the steps: projection (the events of deselected activities are removed from the
-    traces, per object type), variant filter, arcs, arc threshold, arc count, hand removals, connectivity repair
+    traces, per object type), variant filter, arcs, arc threshold, arc count, connectivity repair
     ("Stay connected"), nodes. The kept (projected, variant-filtered) traces are the baseline of everything after
     the variant filter: arcs, frequencies and the object types involved are computed on their events only.
 
@@ -479,7 +459,6 @@ def directly_follows_graph(
         activities: Selected activities per object type (`projection.project_traces`); a selected type that is
             missing gets `projection.default_activities`; None = all defaults.
         stay: "Stay connected": every shown arc lies on a start-to-end path (`connectivity.stay_connected`).
-        removed: Arcs removed by hand, as (object type, source, target).
         arc_total: Arcs (display) in "general" mode: one limit shared by the types without an own arc count
             (`arcs.arc_count_filter`); None = per type.
 
@@ -499,12 +478,10 @@ def directly_follows_graph(
     )
     threshold_arcs = arc_share_filter(all_arcs, {t: s.arc_threshold for t, s in settings.items()})
     counted_arcs = arc_count_filter(threshold_arcs, {t: s.arc_count for t, s in settings.items()}, arc_total)
-    removed = list(removed)
-    kept_arcs = remove_arcs(counted_arcs, removed)
     if stay:
-        shown_arcs = stay_connected(remove_arcs(all_arcs, removed), kept_arcs)
+        shown_arcs = stay_connected(all_arcs, counted_arcs)
     else:
-        shown_arcs = kept_arcs.with_columns(pl.lit(False).alias(CONNECTING))
+        shown_arcs = counted_arcs.with_columns(pl.lit(False).alias(CONNECTING))
 
     shown = shown_activities(shown_arcs)
     frequencies = activity_frequencies(kept_traces, shown)
@@ -529,8 +506,6 @@ def directly_follows_graph(
     arcs_before = arcs_per_type(all_arcs)
     arcs_threshold = arcs_per_type(threshold_arcs)
     arcs_shown = arcs_per_type(shown_arcs)
-    removed_keys = pl.DataFrame(removed, schema={c.OBJECT_TYPE: pl.String, c.SOURCE: pl.String, c.TARGET: pl.String}, orient="row")
-    removed_rows = all_arcs.join(removed_keys, on=KEY, how="semi", nulls_equal=True)
 
     def type_row(row: dict) -> DfgObjectType:
         """The object type of a `type_overview` row, with its numbers if it is selected."""
@@ -571,7 +546,6 @@ def directly_follows_graph(
         activity_options=activity_options,
         variant_default=DEFAULT_VARIANT_THRESHOLD,
         arc_count_max=max(arcs_threshold.values(), default=0),
-        removed_arcs=[DfgArc(**row) for row in removed_rows.select(arc_fields).iter_rows(named=True)],
     )
 
 

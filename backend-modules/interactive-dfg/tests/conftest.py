@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from ocelescope import OCEL
 
-#: Folder of the running example (a copy of the running example of the location-based OCPM project).
+#: Folder of the running example log (`data/running_example`).
 EXAMPLE = Path(__file__).parents[3] / "data" / "running_example"
 
 

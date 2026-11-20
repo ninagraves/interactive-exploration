@@ -2,7 +2,6 @@
 // Each setting is documented in docs/pages/interactive-dfg.md, section "Settings".
 import {
   ActionIcon,
-  Badge,
   Box,
   Button,
   Card,
@@ -19,7 +18,7 @@ import {
   TextInput,
   Tooltip,
 } from "@mantine/core";
-import { ChevronDownIcon, ChevronRightIcon, InfoIcon, SearchIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, InfoIcon, SearchIcon } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import type { DfgActivityOption, DfgActivityTypeOption, DfgObjectType, DfgRequest, DirectlyFollowsGraph } from "../api/interactiveDfg";
 import { type ArcSettings, type BaseArc, neededArcThresholds } from "../lib/dfgArcs";
@@ -27,9 +26,6 @@ import type { ArcLabel, Direction } from "../lib/dfgLayout";
 import { num } from "../lib/format";
 import { UI } from "../lib/palette";
 import { useScheme } from "../lib/scheme";
-
-/** An arc, as the backend identifies it (null = start / end node). */
-export type ArcKey = { object_type: string; source: string | null; target: string | null };
 
 /** The page's settings. `objectTypes` null = the default: the 5 object types with the most objects. */
 export type DfgState = {
@@ -48,8 +44,6 @@ export type DfgState = {
   activities: Record<string, string[]>;
   /** Every arc lies on a path from start to end ("Stay connected"). */
   stayConnected: boolean;
-  /** Arcs removed by hand (double click on an arc). */
-  removed: ArcKey[];
   arcLabel: ArcLabel;
   direction: Direction;
   compact: boolean;
@@ -69,7 +63,6 @@ export const DEFAULT_STATE: DfgState = {
   own: {},
   activities: {},
   stayConnected: true,
-  removed: [],
   arcLabel: "count",
   direction: "RIGHT",
   compact: false,
@@ -77,7 +70,7 @@ export const DEFAULT_STATE: DfgState = {
 
 /**
  * The backend request of a state: only object types, variants and activities. The arc settings (arc threshold, arc
- * count, arcs removed by hand, Stay connected) are applied in the browser (`arcSettings`, lib/dfgArcs.ts), so that
+ * count, Stay connected) are applied in the browser (`arcSettings`, lib/dfgArcs.ts), so that
  * they react without a request.
  */
 export const toRequest = (state: DfgState): DfgRequest => ({
@@ -97,20 +90,12 @@ export const arcSettings = (state: DfgState): ArcSettings => ({
   threshold: (t) => state.own[t]?.arc ?? state.arcThreshold,
   count: (t) => state.own[t]?.count ?? (state.arcCountMode === "perType" ? state.arcCount : null),
   total: state.arcCountMode === "general" ? state.arcCount : null,
-  removed: state.removed,
   stayConnected: state.stayConnected,
 });
 
-/** True if two arcs are the same. */
-const sameArc = (a: ArcKey, b: ArcKey) => a.object_type === b.object_type && a.source === b.source && a.target === b.target;
-
-/** Adds an arc to the removed arcs (double click on an arc in the graph). */
-export const removeArc = (state: DfgState, arc: ArcKey): DfgState =>
-  state.removed.some((r) => sameArc(r, arc)) ? state : { ...state, removed: [...state.removed, arc] };
-
 /** Hover texts of the settings (short versions of the documentation). */
 export const INFO = {
-  reset: "Sets every setting of this page back to its default, and restores the arcs removed by hand.",
+  reset: "Sets every setting of this page back to its default.",
   general:
     "General values: apply to every object type that has no own value (set in the type's unfold). Types with own values are marked in the list.",
   variants:
@@ -118,15 +103,13 @@ export const INFO = {
   arcs: "Arcs (projection), the arc threshold: ranks all arcs of a type (start and end arcs included) by objects, then traversals, and keeps this share of them (rounded up), together with every arc as frequent as the last kept one. 100 % keeps all. Default: 50 %. Click the number to type a value (decimals allowed).",
   arcCount:
     "Arcs (display), the arc count: of the arcs left by Arcs (projection), shows the first N, ranked by objects, traversals, first occurrence, then name (exactly N, ties broken by this order). General (default): N arcs of all object types together (types with an own value keep theirs); per type: N arcs of every type. − and + change it by one. The number shows how many arcs are shown of how many.",
-  stay: "Stay connected: every shown arc lies on a path from the start to the end of its object type. Arcs that Arcs (projection) or Arcs (display) removed are added back where needed (drawn like the others; hovering such an arc says “only kept to stay connected”). It never adds arcs of removed variants, deselected activities or arcs removed by hand.",
-  removed:
-    "Arcs removed by hand (double click on an arc in the graph). While there are any, the sliders no longer describe the graph on their own (marked as manual). Click × to restore an arc.",
+  stay: "Stay connected: every shown arc lies on a path from the start to the end of its object type. Arcs that Arcs (projection) or Arcs (display) removed are added back where needed (drawn like the others; hovering such an arc says “only kept to stay connected”). It never adds arcs of removed variants or deselected activities.",
   objectTypes:
     "Checked object types are drawn with their directly-follows arcs, start and end nodes. Unchecked object types that are involved in the shown events appear only as circles on the activity nodes. Default: the 5 object types with the most objects. Unfold a type for its own values.",
   activities:
     "Activities by number of events that involve an object of a selected type (in brackets). The events of an unchecked activity are removed from the traces before anything else (as in Ocelescope): a trace a, b, c without b becomes a, c. Unfold an activity for its events per object type and to (de)select it for single selected types. Default per type: its most frequent 40 % of activities (at least 3, at most 10). Upper part: the activities in the graph. Lower part: the others, each with the value it needs: in blue the smallest Arcs (projection) that would show it (it is on an included trace, but none of its arcs is kept), in grey the smallest variant threshold that would put it on an included trace. Unfold for the values per type.",
   outside:
-    "Activities of selected types not in the graph. Blue: on an included trace, but none of its arcs is kept; the number is the smallest Arcs (projection) (of any selected type) that keeps one, \"display\" if Arcs (projection) keeps one but Arcs (display) or a removal by hand hides it. Grey: on no included trace; the number is the smallest variant threshold (of any selected type) that would put it on one (for an unchecked activity: if it were checked). “type not selected” means only unselected types have it. Unfold for each selected type.",
+    "Activities of selected types not in the graph. Blue: on an included trace, but none of its arcs is kept; the number is the smallest Arcs (projection) (of any selected type) that keeps one, \"display\" if Arcs (projection) keeps one but Arcs (display) hides it. Grey: on no included trace; the number is the smallest variant threshold (of any selected type) that would put it on one (for an unchecked activity: if it were checked). “type not selected” means only unselected types have it. Unfold for each selected type.",
   otherTypes:
     "Activities with no event that involves an object of a selected type (not in the graph). The value names the object type for which the activity is easiest to include: the type with the smallest variant threshold that puts it on an included trace, if that type were selected with its default activities (and the activity checked), e.g. “operator · ≥ 67 %”. Unfold for the value of every type, selected or not.",
   arcLabel: "What the number on an arc counts: traversals (an object repeating the arc counts each time) or distinct objects.",
@@ -324,14 +307,6 @@ const Search = ({ value, onChange, placeholder }: { value: string; onChange: (v:
   <TextInput size="xs" placeholder={placeholder} value={value} onChange={(e) => onChange(e.currentTarget.value)} leftSection={<SearchIcon size={12} />} />
 );
 
-/** Mark "manual" next to slider headings while arcs are removed by hand (Nina, 2026-11-15). */
-const Manual = ({ on }: { on: boolean }) =>
-  on ? (
-    <Tooltip label={INFO.removed} multiline w={280} withinPortal>
-      <Badge size="xs" variant="light" color="pink">manual</Badge>
-    </Tooltip>
-  ) : null;
-
 /** One object type in the list: checkbox, swatch, count, mark for own values, and the unfold. */
 const TypeRow = ({
   type,
@@ -455,7 +430,7 @@ const easiestText = (option: DfgActivityOption) => {
 };
 
 /** For an activity of the upper part that is not in the graph: per type the Arcs (projection) needed, or "display" if
- * Arcs (projection) already keeps one of its arcs (it is hidden by Arcs (display) or by arcs removed by hand). */
+ * Arcs (projection) already keeps one of its arcs (it is hidden by Arcs (display)). */
 export type ProjectionNeed = number | "display";
 
 /** Text of a `ProjectionNeed`. */
@@ -463,7 +438,7 @@ const projectionText = (need: ProjectionNeed | undefined) => (need === undefined
 
 /** Hover text of a blue number (lower part, on an included trace but not drawn). */
 const PROJECTION_HINT =
-  "For the Arcs (projection) slider: the smallest value (of any selected type) at which an arc of the activity is kept. \"display\": Arcs (projection) already keeps one, but Arcs (display) or an arc removed by hand hides it.";
+  "For the Arcs (projection) slider: the smallest value (of any selected type) at which an arc of the activity is kept. \"display\": Arcs (projection) already keeps one, but Arcs (display) hides it.";
 /** Hover text of a grey number (lower part, on no included trace). */
 const VARIANT_HINT =
   "For the Variants slider: the smallest variant threshold (of any selected type) that puts the activity on an included trace (for an unchecked activity: if it were checked). Unfolded: the exact values (up to 3 decimals). \"type not selected\": only unselected object types have the activity.";
@@ -597,16 +572,13 @@ const ActivityRow = ({
   );
 };
 
-/** Short text of an arc, e.g. "pallet: pick → pack" (▶ / ■ for start and end). */
-const arcText = (a: ArcKey) => `${a.object_type}: ${a.source ?? "▶"} → ${a.target ?? "■"}`;
-
 /**
- * The sidebar "Discovery Settings": general values (variants, Arcs (projection), stay connected), arcs removed by hand,
+ * The sidebar "Discovery Settings": general values (variants, Arcs (projection), stay connected),
  * object types (searchable, scrollable, each with an unfold for own values), activities (searchable, "Select all"
  * for the results, scrollable, each with an unfold per object type). Arcs (display) and the
  * layout settings are in the toolbar above the graph (DfgToolbar.tsx). Fills the height it is given.
  *
- * @param graph The drawn graph (object types, activity options, shown activities, defaults, removed arcs).
+ * @param graph The drawn graph (object types, activity options, shown activities, defaults).
  * @param baseArcs All arcs of the included traces (for the Arcs (projection) needed by activities not in the graph).
  * @param colours Colour per object type.
  * @param state The settings; `setState` changes them (every change keeps the other settings).
@@ -637,7 +609,6 @@ export const DfgSettings = ({
   // As sent: most objects first.
   const listedTypes = objectTypes;
   const matches = (text: string, query: string) => text.toLowerCase().includes(query.trim().toLowerCase());
-  const manual = state.removed.length > 0;
 
   // The activities currently selected for a type (as the backend applied them, i.e. the default if not set).
   const includedOf = (type: string) =>
@@ -711,7 +682,6 @@ export const DfgSettings = ({
   const otherTypes = notShown
     .filter((a) => a.selected_events === 0)
     .sort((x, y) => rank(x) - rank(y) || (x.variant_threshold_needed_exact ?? 1000) - (y.variant_threshold_needed_exact ?? 1000));
-  const removedInfo = new Map((graph.removed_arcs ?? []).map((a) => [arcText(a), a]));
 
   return (
     <Card withBorder padding="xs" h="100%" style={{ display: "flex", flexDirection: "column" }}>
@@ -720,7 +690,7 @@ export const DfgSettings = ({
       {/* Fills the sidebar's height; the activity list takes the rest (Nina, 2026-11-19: more room than the types). */}
       <Stack gap={6} mih="100%">
 
-        <Divider label={<Group gap={6}>General<Manual on={manual} /></Group>} labelPosition="left" />
+        <Divider label="General" labelPosition="left" />
         <PercentSlider
           label="Variants"
           info={`${INFO.general} ${INFO.variants}`}
@@ -743,34 +713,6 @@ export const DfgSettings = ({
             setState((s) => ({ ...s, stayConnected }));
           }} aria-label="Stay connected" />
         </Group>
-        {manual && (
-          <Stack gap={2}>
-            <Group justify="space-between" gap={4} wrap="nowrap">
-              <Heading info={INFO.removed}>
-                {state.removed.length} {state.removed.length === 1 ? "arc" : "arcs"} removed by hand
-              </Heading>
-              <Button size="compact-xs" variant="subtle" onClick={() => setState((s) => ({ ...s, removed: [] }))}>
-                Restore all
-              </Button>
-            </Group>
-            {state.removed.map((a) => {
-              const info = removedInfo.get(arcText(a));
-              return (
-                <Group key={arcText(a)} gap={4} wrap="nowrap" justify="space-between">
-                  <Group gap={5} wrap="nowrap" style={{ minWidth: 0 }}>
-                    <Swatch colour={colours.get(a.object_type)} />
-                    <Text size="xs" truncate>{arcText(a)}</Text>
-                    {info && <Text size="xs" c="dimmed">({num(info.count)})</Text>}
-                  </Group>
-                  <ActionIcon size="xs" variant="subtle" color="gray" aria-label={`Restore ${arcText(a)}`} onClick={() => setState((s) => ({ ...s, removed: s.removed.filter((r) => !sameArc(r, a)) }))}>
-                    <XIcon size={12} />
-                  </ActionIcon>
-                </Group>
-              );
-            })}
-          </Stack>
-        )}
-
         <Divider label="Object types" labelPosition="left" />
         <Group justify="space-between" gap={4} wrap="nowrap">
           <Heading info={INFO.objectTypes}>{selectedTypes.length} of {objectTypes.length} selected</Heading>

@@ -16,13 +16,12 @@ by the arc threshold, the first $N$ of every object type (same $N$ for all types
 the ranking objects, traversals, first occurrence, source, target; ties are broken by this order, so exactly
 $N$ arcs per type are kept (all if the type has fewer). Default: None = all.
 
-Removed arcs (`remove_arcs`): arcs the user removed by hand (double click on the arc).
-The stay-connected repair (`connectivity.stay_connected`) runs after all three.
+The stay-connected repair (`connectivity.stay_connected`) runs after both.
 """
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Mapping
 
 import polars as pl
 
@@ -147,22 +146,6 @@ def arc_count_filter(
         dropped = pooled.slice(max(total, 0)).select(c.OBJECT_TYPE, "_position")
         kept = kept.join(dropped, on=[c.OBJECT_TYPE, "_position"], how="anti", maintain_order="left")
     return kept.drop("_position")
-
-
-def remove_arcs(arcs: pl.DataFrame, removed: Collection[tuple[str, str | None, str | None]]) -> pl.DataFrame:
-    """Remove the arcs the user removed by hand.
-
-    Args:
-        arcs: Arcs.
-        removed: (object type, source, target) of every removed arc; None = start / end node.
-
-    Returns:
-        pl.DataFrame: The other rows of `arcs`, in the same order.
-    """
-    if not removed:
-        return arcs
-    keys = pl.DataFrame(list(removed), schema={c.OBJECT_TYPE: pl.String, c.SOURCE: pl.String, c.TARGET: pl.String}, orient="row")
-    return arcs.join(keys, on=KEY, how="anti", nulls_equal=True, maintain_order="left")
 
 
 def arcs_per_type(arcs: pl.DataFrame) -> dict[str, int]:

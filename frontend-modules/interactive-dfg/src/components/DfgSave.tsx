@@ -16,11 +16,10 @@ export type SaveVersion = "projected" | "displayed";
 
 /** Hover text of the section. */
 const SAVE_INFO =
-  "Saves the current graph to the session as a normal Ocelescope resource. Model: a Directly-Follows Graph resource (its arcs with traversals and objects), shown on Ocelescope's resource pages. Log: a new OCEL with the events of the included traces (after the activity projection and the variant filter) and their relations; it appears in the list of logs. Projected: the graph with Arcs (display) at all and no arcs removed by hand (Stay connected as set); for the log, all events of the included traces. Displayed: exactly the drawn graph; for the log, without the events of activities that are not drawn (arcs hidden between two drawn activities cannot be removed from a log).";
+  "Saves the current graph to the session as a normal Ocelescope resource. Model: a Directly-Follows Graph resource (its arcs with traversals and objects), shown on Ocelescope's resource pages. Log: a new OCEL with the events of the included traces (after the activity projection and the variant filter) and their relations; it appears in the list of logs. Projected: the graph with Arcs (display) at all (Stay connected as set); for the log, all events of the included traces. Displayed: exactly the drawn graph; for the log, without the events of activities that are not drawn (arcs hidden between two drawn activities cannot be removed from a log).";
 
 /**
- * The arcs to save as the model: as drawn, or as projected (the same arc settings, but Arcs (display) at "all" and no
- * arcs removed by hand).
+ * The arcs to save as the model: as drawn, or as projected (the same arc settings, but Arcs (display) at "all").
  *
  * @param base The backend's graph (all arcs of the included traces).
  * @param state The applied page state.
@@ -29,7 +28,7 @@ const SAVE_INFO =
  */
 export const arcsToSave = (base: DirectlyFollowsGraph, state: DfgState, version: SaveVersion): DfgArc[] => {
   const settings = arcSettings(state);
-  const used = version === "displayed" ? settings : { ...settings, count: () => null, total: null, removed: [] };
+  const used = version === "displayed" ? settings : { ...settings, count: () => null, total: null };
   return applyArcSettings(base, used).arcs;
 };
 
