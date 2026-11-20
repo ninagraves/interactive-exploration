@@ -1,7 +1,7 @@
 # Page "Instances"
 
 Status: **suggestion** (2026-11-20), to be reviewed by Nina before it counts as conceptualised.
-Concept: Nina's note `Instances (draft).md` in `interactive_DFG/conceptualisation/` (outside this repo): notation, columns with definitions and examples, traces, object graph, open points. User-facing description with a worked example: module note `Instances Page.md` (outside this repo). `tests/test_instances.py` checks the numbers of the concept note on the pallet example.
+Concept: Nina's note `Instances (draft).md` in `conceptualisation/` of the project folder `interactive-exploration/` (outside this repo): notation, columns with definitions and examples, traces, object graph, open points. User-facing description with a worked example: module note `Instances Page.md` (outside this repo). `tests/test_instances.py` checks the numbers of the concept note on the pallet example.
 
 The page shows every object of the log on the instance level: the **object profile** (one row per object), and for the objects selected in it their **object traces** and their **object graph**.
 Every object is treated alike: there is no distinction between kinds of objects, so every function applies to every object (any object can be selected, in the table or by a double click in the charts).

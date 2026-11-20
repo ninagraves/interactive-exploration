@@ -1,7 +1,7 @@
 # Page "Interactive DFG"
 
 Status: **suggestion** (2026-11-20), to be reviewed by Nina before it counts as conceptualised.
-Concept: Nina's note `Interactive DFG.md` in `interactive_DFG/conceptualisation/` (outside this repo): notation, running example, the eight steps, object-type-specific settings, defaults. User-facing description with worked examples: module note `Interactive DFG Module.md` (outside this repo). The tests `test_general_example_of_the_concept_note`, `test_type_specific_example_of_the_concept_note` and `test_defaults_of_the_module_note` check the numbers of both notes.
+Concept: Nina's note `Interactive DFG.md` in `conceptualisation/` of the project folder `interactive-exploration/` (outside this repo): notation, running example, the eight steps, object-type-specific settings, defaults. User-facing description with worked examples: module note `Interactive DFG Module.md` (outside this repo). The tests `test_general_example_of_the_concept_note`, `test_type_specific_example_of_the_concept_note` and `test_defaults_of_the_module_note` check the numbers of both notes.
 
 The page needs no configuration and no domain knowledge: every object type and every activity of the log is treated alike. It computes the graph on the first request for a log (then cached, `dfg_routes.py`).
 
