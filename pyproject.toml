@@ -1,0 +1,34 @@
+[project]
+name = "ocelescope-instance"
+version = "0.1.0"
+description = "An Ocelescope instance: the published backend host plus local modules"
+requires-python = ">=3.11"
+# `pnpm run add:backend` adds local backend modules here.
+dependencies = [
+  "ocelescope-backend>=0.13.0",
+  "ocelescope-module-interactive-dfg",
+  "ocelescope-module-ocel>=0.13.0",
+]
+
+[tool.uv.workspace]
+members = ["backend-modules/*"]
+
+[tool.uv.sources]
+ocelescope-module-interactive-dfg = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.4.0",
+    "nbstripout>=0.9.1",
+    "pytest>=8",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["backend-modules/interactive-dfg/tests"]
+pythonpath = ["backend-modules/interactive-dfg/tests"]
+
+[tool.nbstripout]
+# Keep cell ids, so stripping outputs does not renumber the cells.
+keep_id = true
+# Drop the Python version etc. that Jupyter writes on every run.
+extra_keys = "metadata.language_info"
