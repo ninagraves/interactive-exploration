@@ -72,6 +72,9 @@ catalogs:
     lucide-react:
       specifier: ^1.63.0
       version: 1.73.0
+    mantine-datatable:
+      specifier: ^9.4.0
+      version: 9.4.0
     next:
       specifier: 16.4.5
       version: 16.4.5
@@ -173,6 +176,9 @@ importers:
       lucide-react:
         specifier: 'catalog:'
         version: 1.73.0(@types/react@19.3.0)(react@19.3.1)
+      mantine-datatable:
+        specifier: 'catalog:'
+        version: 9.4.0(@mantine/core@9.7.4(@mantine/hooks@9.7.4(react@19.3.1))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(@mantine/hooks@9.7.4(react@19.3.1))(clsx@2.1.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       orval:
         specifier: 'catalog:'
         version: 8.45.0(@tanstack/react-query@5.105.0(@types/react@19.3.0)(react@19.3.1))(typescript@6.0.3)(zod@4.6.7)

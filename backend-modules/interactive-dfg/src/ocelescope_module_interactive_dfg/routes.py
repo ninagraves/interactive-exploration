@@ -6,9 +6,11 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from ocelescope_module_interactive_dfg.dfg_routes import router as dfg_router
+from ocelescope_module_interactive_dfg.instance_routes import router as instance_router
 
 router = APIRouter()
 router.include_router(dfg_router)
+router.include_router(instance_router)
 
 
 class StatusResponse(BaseModel):

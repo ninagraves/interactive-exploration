@@ -2,6 +2,7 @@
 
 An [Ocelescope](https://www.ocelescope.org) module with an interactive object-centric directly-follows graph (DFG) for any object-centric event log (OCEL 2.0).
 It needs no domain knowledge and no configuration: every object type and activity of the log is treated alike.
+A second page, "Instances", lists every object with its lifecycle, activities and connectedness, and shows the traces and the object graph of selected objects.
 
 - Backend module: `backend-modules/interactive-dfg` (Python package `ocelescope_module_interactive_dfg`, key `interactiveDfg`)
 - Frontend module: `frontend-modules/interactive-dfg` (`@instance/interactive-dfg`)
@@ -18,7 +19,7 @@ pnpm run sync                        # install backend + frontend, build the mod
 pnpm run dev                         # backend on http://localhost:8003, app on http://localhost:3003
 ```
 
-Upload a log (e.g. `data/running_example/running_example.sqlite`) and open "Interactive DFG" in the sidebar.
+Upload a log (e.g. `data/running_example/running_example.sqlite`) and open "Interactive DFG" or "Instances" in the sidebar.
 Ports 8003/3003 are chosen so that other Ocelescope instances (e.g. on 8000/3000) can run alongside.
 After changing backend routes, run `pnpm run build:modules` to regenerate the typed API client.
 More in `docs/hosting/running-and-testing.md`.

@@ -2,6 +2,7 @@
 
 ## Map
 - `pages/interactive-dfg.md`: the page "Interactive DFG", one section per step and per setting.
+- `pages/instances.md`: the page "Instances" (object profile, object traces, object graph of selected objects).
 - `hosting/`: general tool functionality (architecture, caching, running, testing, dependencies).
 
 ## Content documentation (detailed)
