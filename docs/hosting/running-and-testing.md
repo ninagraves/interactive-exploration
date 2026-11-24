@@ -22,7 +22,7 @@ pnpm run dev           # backend http://localhost:8003 (auto-reload), app http:/
 ```bash
 uv run pytest
 ```
-Tests live in `backend-modules/interactive-dfg/tests/`: `test_dfg.py` (all steps; `test_worked_example_of_the_module_note` and `test_defaults_of_the_module_note` check the numbers of the module note), `test_dfg_export.py` (Save to session), `test_dfg_frontend.py` (Python and TypeScript arc steps agree; skipped without Node 22.6+).
+Tests live in `backend-modules/interactive-dfg/tests/`: `test_dfg.py` (all steps; `test_worked_example_of_the_module_note` and `test_defaults_of_the_module_note` check the numbers of the module note), `test_dfg_export.py` (Save to session), `test_dfg_frontend.py` (Python and TypeScript arc steps agree; skipped without Node 22.6+), `test_dfg_image.py` (the DFG download: scene, SVG and PDF of the running example; skipped without Node 22.6+ or `pnpm install`).
 
 ## Notebooks
 `notebooks/interactive_dfg.ipynb` imports the package from the workspace `.venv` (`ipykernel` is in the `dev` group).

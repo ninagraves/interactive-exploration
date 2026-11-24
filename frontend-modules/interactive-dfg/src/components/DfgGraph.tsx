@@ -1,6 +1,8 @@
 // The drawing of the directly-follows graph: ELK layout (lib/dfgLayout.ts), rendered with React Flow so that
-// it can be panned and zoomed, and its nodes dragged (the arcs follow; Nina, 2026-11-15). Documented in docs/pages/directly-follows-graph.md.
-import { Alert, Box, Group, Loader, Stack, Text, Tooltip } from "@mantine/core";
+// it can be panned and zoomed, and its nodes dragged (the arcs follow; Nina, 2026-11-15). The download button at its
+// top right saves it as PDF, SVG, HTML or PNG (lib/dfgDrawing.ts, lib/dfgDownload.ts). Documented in
+// docs/pages/interactive-dfg.md.
+import { ActionIcon, Alert, Box, Checkbox, Group, Loader, Menu, Stack, Text, Tooltip } from "@mantine/core";
 import {
   applyNodeChanges,
   BaseEdge,
@@ -13,13 +15,17 @@ import {
   type Node,
   type NodeChange,
   type NodeProps,
+  Panel,
   Position,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
 } from "@xyflow/react";
+import { DownloadIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DirectlyFollowsGraph } from "../api/interactiveDfg";
+import { downloadDrawing, IMAGE_FORMATS, type ImageFormat } from "../lib/dfgDownload";
+import type { Drawing } from "../lib/dfgDrawing";
 import {
   type ActivityNodeData,
   type ArcLabel,
@@ -193,6 +199,19 @@ const ArcEdge = memo(({ id, data, markerEnd }: EdgeProps<Edge<ArcData>>) => {
 /** Grey of start and end arcs. */
 const GREY = "#9aa0a6";
 
+/**
+ * Colour of an arc: grey from a start node and to an end node (Nina, 2026-11-14; the start and end nodes carry the
+ * type's colour), otherwise its object type's colour.
+ *
+ * Example: the arc start:coil → crane move is grey; crane move → load truck of coil has coil's colour.
+ *
+ * @param arc The arc's object type and node ids.
+ * @param colours Colour per object type.
+ * @returns The colour.
+ */
+export const arcColour = (arc: { objectType: string; source: string; target: string }, colours: Map<string, string>) =>
+  arc.source.startsWith("start:") || arc.target.startsWith("end:") ? GREY : (colours.get(arc.objectType) ?? GREY);
+
 /** The legend, in grey above the graph. */
 const Legend = () => (
   <Text fz={11} lh={1.3} c="dimmed">
@@ -223,9 +242,7 @@ const toFlow = (layout: Layout, colours: Map<string, string>) => {
     connectable: false,
   }));
   const edges: Edge<ArcData>[] = layout.arcs.map((a) => {
-    // Start and end arcs are grey (Nina, 2026-11-14); the start and end nodes carry the type's colour.
-    const terminal = a.source.startsWith("start:") || a.target.startsWith("end:");
-    const colour = terminal ? GREY : (colours.get(a.objectType) ?? GREY);
+    const colour = arcColour(a, colours);
     return {
       id: a.id,
       source: a.source,
@@ -284,6 +301,69 @@ const followNodes = (edges: Edge<ArcData>[], offsets: Map<string, Offset>) =>
     };
   });
 
+/**
+ * The download button at the top right of the graph: a menu with PDF, SVG, HTML and PNG and the option "With legend".
+ * The file shows the whole graph as drawn (dragged nodes included), not just the part zoomed in on, redrawn as plain
+ * shapes (`lib/dfgDrawing.ts`, `lib/dfgDownload.ts`). React Flow's panels (this button, the zoom controls) are not in it.
+ *
+ * @param drawing Returns the graph as currently drawn.
+ * @param logName The log's name, for the file name.
+ */
+const DownloadMenu = ({ drawing, logName }: { drawing: () => Drawing; logName?: string }) => {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [legend, setLegend] = useState(true);
+  const download = async (format: ImageFormat) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await downloadDrawing(drawing(), format, logName, { legend });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Panel position="top-right">
+      <Group gap={6} wrap="nowrap">
+        {error && (
+          <Text size="xs" c="red">
+            {error}
+          </Text>
+        )}
+        <Menu position="bottom-end" withinPortal shadow="sm" closeOnItemClick>
+          <Menu.Target>
+            <Tooltip label="Download the graph" withinPortal>
+              <ActionIcon size="sm" variant="default" loading={busy} aria-label="Download the graph">
+                <DownloadIcon size={13} />
+              </ActionIcon>
+            </Tooltip>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Label>Download as</Menu.Label>
+            {IMAGE_FORMATS.map(({ format, label, hint }) => (
+              <Menu.Item key={format} onClick={() => download(format)}>
+                <Text size="sm">{label}</Text>
+                <Text size="xs" c="dimmed">{hint}</Text>
+              </Menu.Item>
+            ))}
+            <Menu.Divider />
+            <Box px="sm" py={6}>
+              <Checkbox
+                size="xs"
+                label="With legend (object types and symbols)"
+                checked={legend}
+                onChange={(e) => setLegend(e.currentTarget.checked)}
+              />
+            </Box>
+          </Menu.Dropdown>
+        </Menu>
+      </Group>
+    </Panel>
+  );
+};
+
 /** Fit the view whenever a new layout arrives. */
 const FitOnChange = ({ generation }: { generation: number | null }) => {
   const { fitView } = useReactFlow();
@@ -303,6 +383,8 @@ const FitOnChange = ({ generation }: { generation: number | null }) => {
  * @param compact Compact layout (little white space, `COMPACT_OPTIONS`).
  * @param height Height of the drawing area in pixels.
  * @param onDeselectActivity Called when the user double-clicks an activity node (to deselect it for all types).
+ * @param exportColours Colour per object type in the downloads (light scheme; default: `colours`).
+ * @param logName The log's name, for the file name of a download.
  */
 export const DfgGraph = ({
   graph,
@@ -312,6 +394,8 @@ export const DfgGraph = ({
   compact,
   height,
   onDeselectActivity,
+  exportColours,
+  logName,
 }: {
   graph: DirectlyFollowsGraph;
   colours: Map<string, string>;
@@ -320,6 +404,8 @@ export const DfgGraph = ({
   compact: boolean;
   height: number;
   onDeselectActivity?: (activity: string) => void;
+  exportColours?: Map<string, string>;
+  logName?: string;
 }) => {
   const [layout, setLayout] = useState<Layout | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -378,6 +464,20 @@ export const DfgGraph = ({
     }
     return followNodes(flow.edges, offsets);
   }, [flow, nodes]);
+  // The graph as drawn (current positions, bent arcs), for the downloads, in the export colours (start and end arcs
+  // grey, as on the page).
+  const drawing = useMemo<Drawing>(() => {
+    const light = exportColours ?? colours;
+    return {
+      nodes: nodes.map((n) => ({ x: n.position.x, y: n.position.y, data: n.data })),
+      arcs: edges.flatMap((e) => (e.data ? [{ ...e.data, colour: arcColour(e.data, light) }] : [])),
+      colours: light,
+      arcLabel,
+    };
+  }, [nodes, edges, colours, exportColours, arcLabel]);
+  const drawingRef = useRef(drawing);
+  drawingRef.current = drawing;
+  const currentDrawing = useCallback(() => drawingRef.current, []);
 
   if (error) return <Alert color="red">Layout failed: {error}</Alert>;
   if (!flow) return <Loader size="sm" />;
@@ -430,6 +530,7 @@ export const DfgGraph = ({
           }}
         >
           <Controls showInteractive={false} />
+          <DownloadMenu drawing={currentDrawing} logName={logName} />
           <FitOnChange generation={generation} />
         </ReactFlow>
       </ReactFlowProvider>

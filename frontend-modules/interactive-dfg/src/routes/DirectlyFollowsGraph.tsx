@@ -15,6 +15,7 @@ import { useDebounced } from "../lib/useDebounced";
 import { ModulePage } from "../components/ModulePage";
 import { useScheme } from "../lib/scheme";
 import { errorText } from "../lib/errors";
+import { useLogName } from "../lib/logName";
 import { usePageState } from "../lib/pageState";
 import { emphasisColourMap } from "../lib/palette";
 
@@ -161,6 +162,12 @@ const DfgContent = ({ ocelId }: { ocelId: string }) => {
     const types = (data?.object_types ?? []).map((t) => t.object_type);
     return emphasisColourMap(types.slice(0, DEFAULT_OBJECT_TYPES), types.slice(DEFAULT_OBJECT_TYPES), scheme);
   }, [data, scheme]);
+  // The same colours in the light scheme, for the downloaded image (always light, whatever the page's scheme).
+  const exportColours = useMemo(() => {
+    const types = (data?.object_types ?? []).map((t) => t.object_type);
+    return emphasisColourMap(types.slice(0, DEFAULT_OBJECT_TYPES), types.slice(DEFAULT_OBJECT_TYPES), "light");
+  }, [data]);
+  const logName = useLogName(ocelId);
 
   // The sidebar's checkboxes show the current selection while the graph still shows the applied one.
   const sidebarGraph = useMemo(
@@ -191,6 +198,8 @@ const DfgContent = ({ ocelId }: { ocelId: string }) => {
             compact={applied.compact}
             height={height}
             onDeselectActivity={onDeselectActivity}
+            exportColours={exportColours}
+            logName={logName}
           />
           <HeightHandle height={height} onChange={setHeight} />
         </Box>
