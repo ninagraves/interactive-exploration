@@ -2,6 +2,7 @@
 // Each setting is documented in docs/pages/interactive-dfg.md, section "Settings".
 import {
   ActionIcon,
+  Badge,
   Box,
   Button,
   Card,
@@ -18,13 +19,16 @@ import {
   TextInput,
   Tooltip,
 } from "@mantine/core";
-import { ChevronDownIcon, ChevronRightIcon, InfoIcon, SearchIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, InfoIcon, SearchIcon, XIcon } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import type { DfgActivityOption, DfgActivityTypeOption, DfgObjectType, DfgRequest, DirectlyFollowsGraph } from "../api/interactiveDfg";
+import { activitiesOf, activityMatches, chipCount, matchingObjectTypes } from "../lib/dfgActivitySearch";
 import { type ArcSettings, type BaseArc, neededArcThresholds } from "../lib/dfgArcs";
 import type { ArcLabel, Direction } from "../lib/dfgLayout";
 import { num } from "../lib/format";
+import { useKeptScrollOf } from "../lib/keptView";
 import { UI } from "../lib/palette";
+import { usePageState } from "../lib/pageState";
 import { useScheme } from "../lib/scheme";
 
 /** The page's settings. `objectTypes` null = the default: the 5 object types with the most objects. */
@@ -107,7 +111,11 @@ export const INFO = {
   objectTypes:
     "Checked object types are drawn with their directly-follows arcs, start and end nodes. Unchecked object types that are involved in the shown events appear only as circles on the activity nodes. Default: the 5 object types with the most objects. Unfold a type for its own values.",
   activities:
-    "Activities by number of events that involve an object of a selected type (in brackets). The events of an unchecked activity are removed from the traces before anything else (as in Ocelescope): a trace a, b, c without b becomes a, c. Unfold an activity for its events per object type and to (de)select it for single selected types. Default per type: its most frequent 40 % of activities (at least 3, at most 10). Upper part: the activities in the graph. Lower part: the others, each with the value it needs: in blue the smallest Arcs (projection) that would show it (it is on an included trace, but none of its arcs is kept), in grey the smallest variant threshold that would put it on an included trace. Unfold for the values per type.",
+    "Activities by number of events that involve an object of a selected type (in brackets). The events of an unchecked activity are removed from the traces before anything else (as in Ocelescope): a trace a, b, c without b becomes a, c. Unfold an activity for its events per object type and to (de)select it for single selected types. Default per type: its most frequent 40 % of activities (at least 3, at most 10). Upper part: the activities in the graph. Lower part: the others, each with the value it needs: in blue the smallest Arcs (projection) that would show it (it is on an included trace, but none of its arcs is kept), in grey the smallest variant threshold that would put it on an included trace. Unfold for the values per type. The search finds activities by name. It also offers object types as chips below the search box (at least 4 letters of the name, or the full name). Click a chip to list every activity the type is involved in, most such events first; further chips stack (only activities that all picked types are involved in).",
+  chips:
+    "Object types whose name contains the search text (at least 4 letters, or the full name). Click one to list every activity that the type is involved in, most such events first. Chips stack: search again and click another one to keep only the activities that all picked types are involved in.",
+  picked:
+    "The activities that all picked object types are involved in, most first. The number in brackets: the events of the activity that involve an object of the type. With two or more types the log gives no number of events shared by all of them, so the smallest of their numbers is shown and used (at most that many events can involve all of them). Ties: events with an object of a selected type, then events in the log, then name. One list, without the parts; activities not in the graph keep their value on the right. The search text narrows the list further; a chip's cross removes it, the cross above all of them goes back to all activities.",
   outside:
     "Activities of selected types not in the graph. Blue: on an included trace, but none of its arcs is kept; the number is the smallest Arcs (projection) (of any selected type) that keeps one, \"display\" if Arcs (projection) keeps one but Arcs (display) hides it. Grey: on no included trace; the number is the smallest variant threshold (of any selected type) that would put it on one (for an unchecked activity: if it were checked). “type not selected” means only unselected types have it. Unfold for each selected type.",
   otherTypes:
@@ -317,6 +325,7 @@ const TypeRow = ({
   arcCountMax,
   variantDefault,
   connecting = 0,
+  openKey,
 }: {
   type: DfgObjectType;
   colour?: string;
@@ -327,8 +336,10 @@ const TypeRow = ({
   variantDefault: number;
   /** Arcs of the type added by Stay connected. */
   connecting?: number;
+  /** Where the row keeps whether it is unfolded (`usePageState`). */
+  openKey: string;
 }) => {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = usePageState(openKey, false);
   const scheme = useScheme();
   const own = state.own[type.object_type] ?? {};
   const marks = [
@@ -453,14 +464,15 @@ const TYPE_LIST_HEIGHT = 160;
 /** Smallest height of the activity list in px; it takes all the rest of the sidebar (Nina, 2026-11-19, before 320). */
 const ACTIVITY_LIST_MIN_HEIGHT = 360;
 
-/**
- * True if an activity matches the search: its name contains the query (case-insensitive).
- *
- * @param option The activity.
- * @param query The search text.
- */
-export const activityMatches = (option: DfgActivityOption, query: string) =>
-  option.activity.toLowerCase().includes(query.trim().toLowerCase());
+/** Object type chips shown at most below the activity search (more: "type more letters"). */
+const TYPE_HITS_SHOWN = 6;
+
+/** A clickable chip below the activity search (an object type to list the activities by). */
+const SearchChip = ({ children, icon, onClick }: { children: ReactNode; icon: ReactNode; onClick: () => void }) => (
+  <Badge size="sm" variant="light" color="gray" tt="none" style={{ cursor: "pointer" }} leftSection={icon} onClick={onClick}>
+    {children}
+  </Badge>
+);
 
 /**
  * One activity in the list: a checkbox for all selected types (indeterminate if selected for some of them), its
@@ -476,6 +488,8 @@ const ActivityRow = ({
   projectionExact,
   otherTypes,
   missingTypes,
+  countBy,
+  openKey,
 }: {
   option: DfgActivityOption;
   colours: Map<string, string>;
@@ -491,8 +505,14 @@ const ActivityRow = ({
   otherTypes?: boolean;
   /** Upper part: the selected types without a drawn arc of the activity; their unfold shows the values as below. */
   missingTypes?: Set<string>;
+  /** Object types picked as chips in the activity search: the number in brackets is `chipCount` instead of the
+   * events with an object of a selected type. */
+  countBy?: string[];
+  /** Where the row keeps whether it is unfolded (`usePageState`). */
+  openKey: string;
 }) => {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = usePageState(openKey, false);
+  const count = countBy && countBy.length > 0 ? chipCount(option, countBy) : option.selected_events;
   const selectable = option.object_types.filter((t) => selectedTypes.has(t.object_type));
   const included = selectable.filter((t) => t.included).length;
   // Per type (unfold, exact values with up to 3 decimals): the Arcs (projection) needed (blue), "in the graph", or the
@@ -527,7 +547,7 @@ const ActivityRow = ({
           label={
             <Group gap={5} wrap="nowrap">
               <Text size="xs">{option.activity}</Text>
-              <Text size="xs" c="dimmed">({num(option.selected_events)})</Text>
+              <Text size="xs" c="dimmed">({num(count)})</Text>
             </Group>
           }
         />
@@ -574,14 +594,16 @@ const ActivityRow = ({
 
 /**
  * The sidebar "Discovery Settings": general values (variants, Arcs (projection), stay connected),
- * object types (searchable, scrollable, each with an unfold for own values), activities (searchable, "Select all"
- * for the results, scrollable, each with an unfold per object type). Arcs (display) and the
+ * object types (searchable, scrollable, each with an unfold for own values), activities (searchable by name and by
+ * object type chips, "Select all" for the results, scrollable, each with an unfold per object type). The searches,
+ * picked chips, unfolded rows and scroll positions stay as left when switching pages (`stateKey`). Arcs (display) and the
  * layout settings are in the toolbar above the graph (DfgToolbar.tsx). Fills the height it is given.
  *
  * @param graph The drawn graph (object types, activity options, shown activities, defaults).
  * @param baseArcs All arcs of the included traces (for the Arcs (projection) needed by activities not in the graph).
  * @param colours Colour per object type.
  * @param state The settings; `setState` changes them (every change keeps the other settings).
+ * @param stateKey Where the searches, chips, unfolded rows and scroll positions are kept (e.g. `dfg.sidebar.<log id>`).
  */
 export const DfgSettings = ({
   graph,
@@ -590,6 +612,7 @@ export const DfgSettings = ({
   state,
   setState,
   footer,
+  stateKey,
 }: {
   graph: DirectlyFollowsGraph;
   baseArcs: BaseArc[];
@@ -598,9 +621,16 @@ export const DfgSettings = ({
   setState: (update: (s: DfgState) => DfgState) => void;
   /** Shown below the scrolling part, at the bottom of the sidebar ("Save to session", `DfgSave`). */
   footer?: ReactNode;
+  /** Where the searches, chips, unfolded rows and scroll positions are kept, with the log id (e.g. `dfg.sidebar.<log id>`). */
+  stateKey: string;
 }) => {
-  const [typeQuery, setTypeQuery] = useState("");
-  const [activityQuery, setActivityQuery] = useState("");
+  const [typeQuery, setTypeQuery] = usePageState(`${stateKey}.typeQuery`, "");
+  const [activityQuery, setActivityQuery] = usePageState(`${stateKey}.activityQuery`, "");
+  /** Object types picked as chips (they stack): the activities that all of them are involved in are listed, most first. */
+  const [typeChips, setTypeChips] = usePageState<string[]>(`${stateKey}.typeChips`, []);
+  const sidebarScroll = useKeptScrollOf<HTMLDivElement>(`${stateKey}.scroll`);
+  const typeScroll = useKeptScrollOf<HTMLDivElement>(`${stateKey}.types.scroll`);
+  const activityScroll = useKeptScrollOf<HTMLDivElement>(`${stateKey}.activities.scroll`);
   const objectTypes = graph.object_types;
   const activityOptions = graph.activity_options;
   const selected = objectTypes.filter((t) => t.selected);
@@ -636,7 +666,16 @@ export const DfgSettings = ({
   // Upper part: the activities in the graph; lower part: the others (Nina, 2026-11-17; before: upper part = on an
   // included trace). Lower part: first those on an included trace (Arcs (projection) needed, in blue), then the
   // others (variant threshold needed), least first.
-  const listed = activityOptions.filter((a) => activityMatches(a, activityQuery));
+  // Object type chips (they stack): with chips picked, the list holds every activity that all of them are involved in,
+  // most such events first (`chipCount`), in one part (the search text narrows it further).
+  const pickedTypes = typeChips.filter((c) => objectTypes.some((t) => t.object_type === c));
+  const listed = activitiesOf(activityOptions, pickedTypes).filter((a) => activityMatches(a, activityQuery));
+  const typeHits = matchingObjectTypes(listedTypes.map((t) => t.object_type), activityQuery).filter((t) => !pickedTypes.includes(t));
+  const addChip = (type: string) => {
+    setTypeChips((cs) => [...cs.filter((c) => c !== type), type]);
+    setActivityQuery("");
+  };
+  const dropChip = (type: string) => setTypeChips((cs) => cs.filter((c) => c !== type));
   const needed = useMemo(() => neededArcThresholds(baseArcs), [baseArcs]);
   const neededExact = useMemo(() => neededArcThresholds(baseArcs, 3), [baseArcs]);
   const shownActivities = new Set(graph.activities.map((a) => a.activity));
@@ -682,11 +721,33 @@ export const DfgSettings = ({
   const otherTypes = notShown
     .filter((a) => a.selected_events === 0)
     .sort((x, y) => rank(x) - rank(y) || (x.variant_threshold_needed_exact ?? 1000) - (y.variant_threshold_needed_exact ?? 1000));
+  /** One row of the activity list, with the values of its part (in the graph, not in the graph, other types only). */
+  const activityRow = (a: DfgActivityOption) => {
+    const inGraphRow = shownActivities.has(a.activity);
+    const missing = inGraphRow ? missingTypes(a) : undefined;
+    const needs = projectionNeeds(a, missing);
+    return (
+      <ActivityRow
+        key={a.activity}
+        openKey={`${stateKey}.open.activity.${a.activity}`}
+        option={a}
+        colours={colours}
+        selectedTypes={selectedSet}
+        setIncluded={setIncluded}
+        projection={needs}
+        projectionExact={projectionExact(a, needs)}
+        missingTypes={missing}
+        outside={!inGraphRow}
+        otherTypes={!inGraphRow && a.selected_events === 0}
+        countBy={pickedTypes}
+      />
+    );
+  };
 
   return (
     <Card withBorder padding="xs" h="100%" style={{ display: "flex", flexDirection: "column" }}>
       <Text size="sm" fw={700} mb={6}>Discovery Settings</Text>
-      <Box style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" }} pr={4}>
+      <Box ref={sidebarScroll} style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden" }} pr={4}>
       {/* Fills the sidebar's height; the activity list takes the rest (Nina, 2026-11-19: more room than the types). */}
       <Stack gap={6} mih="100%">
 
@@ -718,7 +779,7 @@ export const DfgSettings = ({
           <Heading info={INFO.objectTypes}>{selectedTypes.length} of {objectTypes.length} selected</Heading>
         </Group>
         <Search value={typeQuery} onChange={setTypeQuery} placeholder="Search object types" />
-        <ScrollArea.Autosize mah={TYPE_LIST_HEIGHT} type="auto" offsetScrollbars>
+        <ScrollArea.Autosize viewportRef={typeScroll} mah={TYPE_LIST_HEIGHT} type="auto" offsetScrollbars>
           <Stack gap={2}>
             {listedTypes
               .filter((t) => matches(t.object_type, typeQuery))
@@ -733,6 +794,7 @@ export const DfgSettings = ({
                   arcCountMax={graph.arc_count_max ?? 0}
                   variantDefault={graph.variant_default ?? 100}
                   connecting={graph.arcs.filter((a) => a.connecting && a.object_type === t.object_type).length}
+                  openKey={`${stateKey}.open.type.${t.object_type}`}
                 />
               ))}
           </Stack>
@@ -751,9 +813,9 @@ export const DfgSettings = ({
         </Group>
         <Group gap={4} wrap="nowrap">
           <Box style={{ flex: 1 }}>
-            <Search value={activityQuery} onChange={setActivityQuery} placeholder="Search activities" />
+            <Search value={activityQuery} onChange={setActivityQuery} placeholder="Search activities or object types" />
           </Box>
-          {activityQuery.trim() !== "" && listed.length > 0 && (
+          {(activityQuery.trim() !== "" || pickedTypes.length > 0) && listed.length > 0 && (
             <Tooltip label="Select every activity found, for every selected object type with events of it" withinPortal multiline w={220}>
               <Button size="compact-xs" variant="light" onClick={() => selectAll(listed)}>
                 Select all ({listed.length})
@@ -761,71 +823,77 @@ export const DfgSettings = ({
             </Tooltip>
           )}
         </Group>
-        <ScrollArea type="auto" offsetScrollbars style={{ flex: "1 1 0", minHeight: ACTIVITY_LIST_MIN_HEIGHT }}>
+        {typeHits.length > 0 && (
+          <Group gap={4} wrap="wrap">
+            <Tooltip label={INFO.chips} withinPortal multiline w={260}>
+              <Text size="xs" c="dimmed">List by:</Text>
+            </Tooltip>
+            {typeHits.slice(0, TYPE_HITS_SHOWN).map((t) => (
+              <SearchChip key={t} onClick={() => addChip(t)} icon={<Swatch colour={colours.get(t)} circle />}>
+                {t}
+              </SearchChip>
+            ))}
+            {typeHits.length > TYPE_HITS_SHOWN && (
+              <Text size="xs" c="dimmed">+{typeHits.length - TYPE_HITS_SHOWN} more types, type more letters</Text>
+            )}
+          </Group>
+        )}
+        {pickedTypes.length > 0 && (
           <Stack gap={2}>
-            {inGraph.map((a) => {
-              const missing = missingTypes(a);
-              const needs = projectionNeeds(a, missing);
-              return (
-                <ActivityRow
-                  key={a.activity}
-                  option={a}
-                  colours={colours}
-                  selectedTypes={selectedSet}
-                  setIncluded={setIncluded}
-                  projection={needs}
-                  projectionExact={projectionExact(a, needs)}
-                  missingTypes={missing}
-                />
-              );
-            })}
-            {outsideGraph.length > 0 && (
-              <Divider
-                my={2}
-                label={<Heading info={INFO.outside}>Not in the graph ({outsideGraph.length})</Heading>}
-                labelPosition="left"
-                variant="dashed"
-              />
+            <Group gap={4} wrap="nowrap" justify="space-between">
+              <Heading info={INFO.picked}>
+                {listed.length} {listed.length === 1 ? "activity" : "activities"} with {pickedTypes.length === 1 ? "this chip" : `all ${pickedTypes.length} chips`}, most first
+              </Heading>
+              <Tooltip label="Back to all activities" withinPortal>
+                <ActionIcon size="xs" variant="subtle" color="gray" aria-label="Back to all activities" onClick={() => setTypeChips([])}>
+                  <XIcon size={12} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
+            <Group gap={4} wrap="wrap">
+              {pickedTypes.map((t) => (
+                <Badge
+                  key={t}
+                  size="sm"
+                  variant="outline"
+                  color="gray"
+                  tt="none"
+                  leftSection={<Swatch colour={colours.get(t)} circle />}
+                  rightSection={<XIcon size={10} style={{ cursor: "pointer" }} aria-label={`Remove ${t}`} onClick={() => dropChip(t)} />}
+                >
+                  {t}
+                </Badge>
+              ))}
+            </Group>
+          </Stack>
+        )}
+        <ScrollArea viewportRef={activityScroll} type="auto" offsetScrollbars style={{ flex: "1 1 0", minHeight: ACTIVITY_LIST_MIN_HEIGHT }}>
+          <Stack gap={2}>
+            {pickedTypes.length > 0 ? (
+              listed.map(activityRow)
+            ) : (
+              <>
+                {inGraph.map(activityRow)}
+                {outsideGraph.length > 0 && (
+                  <Divider
+                    my={2}
+                    label={<Heading info={INFO.outside}>Not in the graph ({outsideGraph.length})</Heading>}
+                    labelPosition="left"
+                    variant="dashed"
+                  />
+                )}
+                {outsideGraph.map(activityRow)}
+                {otherTypes.length > 0 && (
+                  <Divider
+                    my={2}
+                    label={<Heading info={INFO.otherTypes}>Other object types only ({otherTypes.length})</Heading>}
+                    labelPosition="left"
+                    variant="dashed"
+                  />
+                )}
+                {otherTypes.map(activityRow)}
+              </>
             )}
-            {outsideGraph.map((a) => {
-              const needs = projectionNeeds(a);
-              return (
-                <ActivityRow
-                  key={a.activity}
-                  option={a}
-                  colours={colours}
-                  selectedTypes={selectedSet}
-                  setIncluded={setIncluded}
-                  projection={needs}
-                  projectionExact={projectionExact(a, needs)}
-                  outside
-                />
-              );
-            })}
-            {otherTypes.length > 0 && (
-              <Divider
-                my={2}
-                label={<Heading info={INFO.otherTypes}>Other object types only ({otherTypes.length})</Heading>}
-                labelPosition="left"
-                variant="dashed"
-              />
-            )}
-            {otherTypes.map((a) => {
-              const needs = projectionNeeds(a);
-              return (
-                <ActivityRow
-                  key={a.activity}
-                  option={a}
-                  colours={colours}
-                  selectedTypes={selectedSet}
-                  setIncluded={setIncluded}
-                  projection={needs}
-                  projectionExact={projectionExact(a, needs)}
-                  outside
-                  otherTypes
-                />
-              );
-            })}
           </Stack>
         </ScrollArea>
       </Stack>

@@ -26,11 +26,19 @@ The route (`dfg_routes.py`, `POST /{ocel_id}/dfg`, body `DfgRequest`) runs steps
 | Arcs (projection) (general, own per type) | 50 % | `arcSettings`, `arcShareFilter` |
 | Stay connected | on | `stayConnected` in `lib/dfgArcs.ts` |
 | Object types (searchable list, own values in the unfold) | the 5 types with the most objects | `TypeRow`; `pendingSelection` (`lib/dfgView.ts`, `DEFAULT_OBJECT_TYPES`) |
-| Activities (searchable list, per type in the unfold; double click on a node deselects it) | per type 40 % of its activities, 3 to 10 | `ActivityRow`, `deselectActivity` |
+| Activities (searchable list by name and by object type chips, per type in the unfold; double click on a node deselects it) | per type 40 % of its activities, 3 to 10 | `ActivityRow`, `deselectActivity`; search: `lib/dfgActivitySearch.ts` |
 | Save to session (model / log, projected / displayed) | model, displayed | `DfgSave.tsx` |
 | Download (PDF, SVG, HTML, PNG; With legend), button at the top right of the graph | with legend | `DownloadMenu` in `DfgGraph.tsx`, `lib/dfgDrawing.ts`, `lib/dfgDownload.ts` |
 
-The graph waits 2 s after the last change (`RECALCULATION_DELAY_MS` in `routes/DirectlyFollowsGraph.tsx`); "Update now" skips the wait. Settings are kept per log in the tab (`usePageState`, key `dfg.v1.<log id>`).
+The graph waits 2 s after the last change (`RECALCULATION_DELAY_MS` in `routes/DirectlyFollowsGraph.tsx`); "Update now" skips the wait. Settings are kept per log in the tab (`usePageState`, key `dfg.v1.<log id>`). The whole page stays as it was left when switching pages: searches, picked chips, unfolded rows, scroll positions, the layout with dragged nodes, zoom and pan (`stateKey` of `DfgSettings` and `DfgGraph`; `docs/hosting/state-and-caching.md`, section "Page state").
+
+## Activity search
+`lib/dfgActivitySearch.ts`, used by `DfgSettings` (`components/DfgSettings.tsx`). The search box above the activity list ("Search activities or object types") does two things:
+- **By name**: the list keeps the activities whose name contains the text (`activityMatches`, case-insensitive). "Select all (n)" selects every activity found for every selected object type with events of it.
+- **Object type chips**: below the box, "List by:" offers the object types whose name contains the text (`matchingObjectTypes`), in the order of the type list (most objects first), at most 6 (`TYPE_HITS_SHOWN`; more: "+n more types, type more letters"). Below 4 letters (`CHIP_QUERY_MIN_LENGTH`) only a type whose full name is the text is offered, since fewer letters are not selective enough. Example (running example): "coil" offers coil, "coi" nothing, "slab" slab.
+- **Picked chips**: clicking a chip clears the text and lists every activity the type is involved in, most of the type's events first (`activitiesOf`, `rankedBy`), in one list without the three parts; activities not in the graph keep their value on the right. Chips stack: a further chip keeps only the activities that all picked types are involved in. The number in brackets is then `chipCount`: the events of the activity with an object of the type; with two or more types the smallest of their numbers (the route has no number of events shared by several types, and at most that many events can involve all of them). Ties: events with an object of a selected type, then events in the log, then name. The search text narrows the list further; a chip's × removes it, the × above them goes back to all activities.
+- Example (running example): coil lists crane move (4), quality check (4), load truck (2), unload truck (2), cut (1), label (1), roll (1); coil + slab lists roll (1).
+- Test: `test_activity_search_chips_list_the_activities_of_all_picked_types` in `tests/test_dfg_frontend.py` runs the TypeScript functions with Node on the route's activity list and compares them with a Python sort.
 
 ## Download
 `DownloadMenu` in `components/DfgGraph.tsx`, `lib/dfgDrawing.ts`, `lib/dfgDownload.ts`. A button at the top right of the graph opens a menu with **PDF (vector)**, **SVG (vector)**, **HTML (interactive)** and **PNG (image)**, and the checkbox **With legend** (on by default; kept while the page is open). The file shows the whole graph as drawn (dragged nodes included), whatever part is zoomed in on; zoom controls and the button are left out. File name: `dfg_<log name>_<date>.<ext>` (`exportFileName`; the log's name from Ocelescope's OCEL endpoint, `lib/logName.ts`), e.g. `dfg_running_example_2026-11-24.pdf`.
@@ -52,6 +60,7 @@ The graph waits 2 s after the last change (`RECALCULATION_DELAY_MS` in `routes/D
 - Other variant filter or arc ranking: `variants.kept_variants`, `arcs.arc_order`, `arcs.arc_share_filter`; change `lib/dfgArcs.ts` along (`test_dfg_frontend.py`).
 - Other defaults of the sliders: `dfg/graph.py` **and** `DEFAULT_STATE` in `DfgSettings.tsx`.
 - Look: `SIZES`, `ELK_OPTIONS`, `COMPACT_OPTIONS` in `lib/dfgLayout.ts`; colours in `lib/palette.ts` (`emphasisColourMap`).
+- Activity search: number of chips shown `TYPE_HITS_SHOWN` (`DfgSettings.tsx`), letters needed for a part of a name `CHIP_QUERY_MIN_LENGTH`, ranking `rankedBy`, count of stacked chips `chipCount` (`lib/dfgActivitySearch.ts`; change `test_dfg_frontend.py` along).
 - Downloads: colours `EXPORT_COLOURS`, margin `MARGIN`, arrow `ARROW`, legend texts in `legendGroups` (`lib/dfgDrawing.ts`); formats and labels `IMAGE_FORMATS`, PNG size `PNG_LIMITS`, file name `exportFileName`, the interactive page's look and script in `sceneHtml` / `PAGE_SCRIPT` (`lib/dfgDownload.ts`). A change of the page's node drawing (`ActivityNode`, `TerminalNode`, `ArcEdge` in `DfgGraph.tsx`) needs the same change in `activityGroup`, `terminalGroup`, `arcGroup`. A dark export: replace `EXPORT_COLOURS` and pass the page's `colours` instead of `exportColours`. Embedded fonts in the PDF: register a TTF with jsPDF's `addFileToVFS` / `addFont` and use it in `pdfShape`.
 
 ## Alternatives considered
@@ -60,4 +69,5 @@ The graph waits 2 s after the last change (`RECALCULATION_DELAY_MS` in `routes/D
 - **Sharing default activities between all selected types**: with five default types the defaults of one type would spread to all others; each type keeps its own.
 - **Download as a screenshot of the page** (html-to-image of React Flow's viewport, as Ocelescope's own graph viewer does): its SVG wraps the nodes as HTML in a `foreignObject`, which Inkscape and LaTeX do not show, and its PDF holds a PNG of at most 2048 px; the redrawn vector scene avoids both.
 - **PDF via svg2pdf.js** (converting the SVG): one more dependency; jsPDF's own drawing commands suffice for the few shapes of the scene.
+- **Stacked chips counted by shared events**: the number of events that involve objects of all picked types would be exact, but the route sends only events per (activity, type); the smallest of them is an upper bound and needs no backend change.
 - **Removing arcs by hand** (double click on an arc): removed on 2026-11-20 (Nina); every shown arc follows from the settings of the view.

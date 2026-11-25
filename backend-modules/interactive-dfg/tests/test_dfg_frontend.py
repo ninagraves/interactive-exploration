@@ -1,6 +1,7 @@
 """Cross-check: the page applies the arc settings in the browser (`lib/dfgArcs.ts`), the notebooks
 and tests in Python (`dfg/arcs.py`, `dfg/connectivity.py`). This test runs the TypeScript functions with Node on the
 arcs the route sends and checks that they show exactly the arcs of `directly_follows_graph`.
+The activity search (`lib/dfgActivitySearch.ts`) is checked on the running example in the same way.
 Skipped if Node (22.6 or later, for TypeScript without a build step) is not installed.
 """
 
@@ -11,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from ocelescope_module_interactive_dfg.dfg.graph import TypeSetting, directly_follows_graph
+from ocelescope_module_interactive_dfg.dfg.graph import TypeSetting, directly_follows_graph, log_frames
 
 from test_dfg import _pallet_example, every_activity
 
@@ -154,3 +155,58 @@ def test_exact_projection_thresholds_match_python(tmp_path):
         assert activity in drawn(value)
         if value > 0.001:
             assert activity not in drawn(round(value - 0.001, 3))
+
+
+DFG_SEARCH = DFG_ARCS.parent / "dfgActivitySearch.ts"
+SEARCH_RUNNER = """
+const { activitiesOf, chipCount, matchingObjectTypes, activityMatches } = await import(process.argv[2]);
+const { options, types, cases } = JSON.parse(await new Promise((ok) => { let s = ""; process.stdin.on("data", (d) => (s += d)); process.stdin.on("end", () => ok(s)); }));
+const out = {
+  lists: cases.map((picked) => activitiesOf(options, picked).map((o) => [o.activity, chipCount(o, picked)])),
+  all: activitiesOf(options, []).map((o) => o.activity),
+  hits: Object.fromEntries(["o", "co", "COI", "coil", " slab ", "Coil", "x"].map((q) => [q, matchingObjectTypes(types, q)])),
+  short: ["bo", "box", "BOX ", "boxe"].map((q) => matchingObjectTypes(["boxes", "box"], q)),
+  names: options.filter((o) => activityMatches(o, " TRUCK")).map((o) => o.activity),
+};
+console.log(JSON.stringify(out));
+"""
+
+#: Picked object type chips (they stack) on the running example.
+CHIP_CASES = [["coil"], ["slab"], ["coil", "slab"], ["slab", "coil"]]
+
+
+def test_activity_search_chips_list_the_activities_of_all_picked_types(tmp_path, ocel):
+    """Object type chips: every activity that all picked types are involved in, by the smallest of their events
+    (`chipCount`), ties by events with an object of a selected type, events in the log, name. Type names match
+    case-insensitively by a part from 4 letters on, below only by their full name; activity names by a part."""
+    node = _node()
+    graph = directly_follows_graph(log_frames(ocel))
+    runner = tmp_path / "search.mjs"
+    runner.write_text(SEARCH_RUNNER)
+    payload = {
+        "options": [o.model_dump() for o in graph.activity_options],
+        "types": [t.object_type for t in graph.object_types],
+        "cases": CHIP_CASES,
+    }
+    result = subprocess.run([node, str(runner), DFG_SEARCH.as_uri()], input=json.dumps(payload), capture_output=True, text=True, check=True)
+    out = json.loads(result.stdout)
+
+    for picked, got in zip(CHIP_CASES, out["lists"], strict=True):
+        events = {
+            o.activity: min(next((x.events for x in o.object_types if x.object_type == t), 0) for t in picked)
+            for o in graph.activity_options
+        }
+        expected = sorted(
+            (o for o in graph.activity_options if events[o.activity] > 0),
+            key=lambda o: (-events[o.activity], -o.selected_events, -o.log_events, o.activity),
+        )
+        assert got == [[o.activity, events[o.activity]] for o in expected], picked
+    coil = [["crane move", 4], ["quality check", 4], ["load truck", 2], ["unload truck", 2], ["cut", 1], ["label", 1], ["roll", 1]]
+    assert out["lists"][0] == coil
+    assert [a for a, _ in out["lists"][1]] == ["cast slab", "inspect slab", "roll"]
+    assert out["lists"][2] == out["lists"][3] == [["roll", 1]]
+    assert out["all"] == [o.activity for o in graph.activity_options]
+
+    assert out["hits"] == {"o": [], "co": [], "COI": [], "coil": ["coil"], " slab ": ["slab"], "Coil": ["coil"], "x": []}
+    assert out["short"] == [[], ["box"], ["box"], ["boxes"]]
+    assert out["names"] == [o.activity for o in graph.activity_options if "truck" in o.activity]

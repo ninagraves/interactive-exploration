@@ -6,7 +6,7 @@ Concept: Nina's note `Instances (draft).md` in `conceptualisation/` of the proje
 The page shows every object of the log on the instance level: the **object profile** (one row per object), and for the objects selected in it their **object traces** and their **object graph**.
 Every object is treated alike: there is no distinction between kinds of objects, so every function applies to every object (any object can be selected, in the table or by a double click in the charts).
 
-Backend: `instances/` (content), `instance_routes.py` (routes, caches). Frontend: `routes/Instances.tsx` (page, selection bar), `components/ObjectProfileTable.tsx`, `ProfileColumnFilter.tsx`, `ObjectTracesChart.tsx`, `ObjectGraphChart.tsx`.
+Backend: `instances/` (content), `instance_routes.py` (routes, caches). Frontend: `routes/Instances.tsx` (page, selection bar), `components/ObjectProfileTable.tsx`, `ProfileColumnFilter.tsx`, `ObjectTracesChart.tsx`, `ObjectGraphChart.tsx`. The page opens again as it was left, scroll position included (`ModulePage`; `docs/hosting/state-and-caching.md`, section "Page state").
 
 ## Tables (`instances/frames.py`)
 `instance_frames(ocel)` reads the log once per log version (cached in `instance_routes._instance_frames`): `InstanceFrames` with `e2o` (event, object; unique pairs, so an object linked to an event with two qualifiers counts once), `o2o` (source, target, qualifier), `objects` (object, object_type; also objects without events) and `events` (event, time, activity).

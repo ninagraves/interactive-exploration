@@ -37,6 +37,8 @@ import {
   type TerminalNodeData,
 } from "../lib/dfgLayout";
 import { num } from "../lib/format";
+import { useKeptViewport } from "../lib/keptView";
+import { keep, recall, sameInputs } from "../lib/pageState";
 
 type NodeData = (ActivityNodeData | TerminalNodeData) & { colours: Map<string, string> };
 type ArcData = LaidOutArc & { colour: string; width: number };
@@ -364,12 +366,15 @@ const DownloadMenu = ({ drawing, logName }: { drawing: () => Drawing; logName?: 
   );
 };
 
-/** Fit the view whenever a new layout arrives. */
-const FitOnChange = ({ generation }: { generation: number | null }) => {
+/** For `FitOnChange` without a kept view: fit every new layout. */
+const NEVER = () => false;
+
+/** Fit the view whenever a new layout arrives (not for a layout whose zoom and pan were restored, `skip`). */
+const FitOnChange = ({ generation, skip }: { generation: number | null; skip: (generation: number | null) => boolean }) => {
   const { fitView } = useReactFlow();
   useEffect(() => {
-    if (generation !== null) requestAnimationFrame(() => fitView({ padding: 0.08, maxZoom: 1 }));
-  }, [generation, fitView]);
+    if (generation !== null && !skip(generation)) requestAnimationFrame(() => fitView({ padding: 0.08, maxZoom: 1 }));
+  }, [generation, fitView, skip]);
   return null;
 };
 
@@ -385,6 +390,8 @@ const FitOnChange = ({ generation }: { generation: number | null }) => {
  * @param onDeselectActivity Called when the user double-clicks an activity node (to deselect it for all types).
  * @param exportColours Colour per object type in the downloads (light scheme; default: `colours`).
  * @param logName The log's name, for the file name of a download.
+ * @param stateKey Where the layout, the dragged positions and zoom and pan are kept (e.g. `dfg.view.<log id>`), so that
+ *   the graph looks as it was left when the page opens again with the same graph (`lib/keptView.ts`); none: not kept.
  */
 export const DfgGraph = ({
   graph,
@@ -396,6 +403,7 @@ export const DfgGraph = ({
   onDeselectActivity,
   exportColours,
   logName,
+  stateKey,
 }: {
   graph: DirectlyFollowsGraph;
   colours: Map<string, string>;
@@ -406,17 +414,31 @@ export const DfgGraph = ({
   onDeselectActivity?: (activity: string) => void;
   exportColours?: Map<string, string>;
   logName?: string;
+  stateKey?: string;
 }) => {
-  const [layout, setLayout] = useState<Layout | null>(null);
+  // The layout kept when the page was left, if it was made for the same graph and look settings.
+  const inputs = [graph, direction, arcLabel, compact];
+  const keptLayout = () => {
+    const kept = stateKey ? recall<{ inputs: unknown[]; layout: Layout }>(`${stateKey}.layout`) : undefined;
+    return kept && sameInputs(kept.inputs, inputs) ? kept.layout : null;
+  };
+  const [layout, setLayoutState] = useState<Layout | null>(keptLayout);
   const [error, setError] = useState<string | null>(null);
-  const current = useRef<{ layout: Layout | null; direction: Direction; arcLabel: ArcLabel; compact: boolean } | null>(null);
+  const setLayout = (next: Layout) => {
+    if (stateKey) keep(`${stateKey}.layout`, { inputs, layout: next });
+    setLayoutState(next);
+  };
   useEffect(() => {
     let cancelled = false;
     setError(null);
+    const kept = keptLayout();
+    if (kept) {
+      setLayoutState(kept);
+      return;
+    }
     layoutGraph(graph, direction, arcLabel, compact).then(
       (result) => {
         if (cancelled) return;
-        current.current = { layout: result, direction, arcLabel, compact };
         setLayout(result);
       },
       (err: unknown) => !cancelled && setError(String(err)),
@@ -424,15 +446,23 @@ export const DfgGraph = ({
     return () => {
       cancelled = true;
     };
+    // The kept layout and `setLayout` follow from these inputs and `stateKey`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph, direction, arcLabel, compact]);
   const flow = useMemo(() => (layout ? toFlow(layout, colours) : null), [layout, colours]);
   // Dragged node positions, kept per layout generation: a new ELK run (a setting changed) starts from its own
   // positions.
   const generation = layout?.generation ?? null;
-  const [dragged, setDragged] = useState<{ generation: number | null; nodes: Map<string, Node<NodeData>> }>({
-    generation: null,
-    nodes: new Map(),
+  type Dragged = { generation: number | null; nodes: Map<string, Node<NodeData>> };
+  const [dragged, setDragged] = useState<Dragged>(() => {
+    const kept = stateKey ? recall<Dragged>(`${stateKey}.dragged`) : undefined;
+    return kept && kept.generation === generation ? kept : { generation: null, nodes: new Map() };
   });
+  useEffect(() => {
+    if (stateKey) keep(`${stateKey}.dragged`, dragged);
+  }, [stateKey, dragged]);
+  // Zoom and pan as left (only for the layout shown when the page opens again; new layouts are fitted).
+  const { skipFit, ...viewport } = useKeptViewport(`${stateKey}.viewport`, generation);
   const nodes = useMemo(() => {
     const flowNodes = flow?.nodes ?? [];
     if (dragged.generation !== generation) return flowNodes;
@@ -509,7 +539,7 @@ export const DfgGraph = ({
           elementsSelectable={false}
           minZoom={0.05}
           maxZoom={3}
-          fitView
+          {...(stateKey ? viewport : { fitView: true })}
           fitViewOptions={{ padding: 0.08, maxZoom: 1 }}
           // Double click on an activity deselects it for every object type (Nina, 2026-11-19); no zoom on double click.
           zoomOnDoubleClick={false}
@@ -531,7 +561,7 @@ export const DfgGraph = ({
         >
           <Controls showInteractive={false} />
           <DownloadMenu drawing={currentDrawing} logName={logName} />
-          <FitOnChange generation={generation} />
+          <FitOnChange generation={generation} skip={stateKey ? skipFit : NEVER} />
         </ReactFlow>
       </ReactFlowProvider>
     </Box>

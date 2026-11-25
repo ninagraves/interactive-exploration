@@ -200,6 +200,7 @@ const DfgContent = ({ ocelId }: { ocelId: string }) => {
             onDeselectActivity={onDeselectActivity}
             exportColours={exportColours}
             logName={logName}
+            stateKey={`dfg.view.${ocelId}`}
           />
           <HeightHandle height={height} onChange={setHeight} />
         </Box>
@@ -216,6 +217,7 @@ const DfgContent = ({ ocelId }: { ocelId: string }) => {
                 colours={colours}
                 state={state}
                 setState={setState}
+                stateKey={`dfg.sidebar.${ocelId}`}
                 footer={base && <DfgSave ocelId={ocelId} base={base} applied={applied} pending={pending} />}
               />
             </Box>
