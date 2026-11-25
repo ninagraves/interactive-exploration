@@ -1,6 +1,8 @@
 // The drawing of the directly-follows graph: ELK layout (lib/dfgLayout.ts), rendered with React Flow so that
-// it can be panned and zoomed, and its nodes dragged (the arcs follow; Nina, 2026-11-15). Documented in docs/pages/directly-follows-graph.md.
-import { Alert, Box, Group, Loader, Stack, Text, Tooltip } from "@mantine/core";
+// it can be panned and zoomed, and its nodes dragged (the arcs follow; Nina, 2026-11-15). The download button at its
+// top right saves it as PDF, SVG, HTML or PNG (lib/dfgDrawing.ts, lib/dfgDownload.ts). Documented in
+// docs/pages/interactive-dfg.md.
+import { ActionIcon, Alert, Box, Checkbox, Group, Loader, Menu, Stack, Text, Tooltip } from "@mantine/core";
 import {
   applyNodeChanges,
   BaseEdge,
@@ -13,13 +15,17 @@ import {
   type Node,
   type NodeChange,
   type NodeProps,
+  Panel,
   Position,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
 } from "@xyflow/react";
+import { DownloadIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DirectlyFollowsGraph } from "../api/interactiveDfg";
+import { downloadDrawing, IMAGE_FORMATS, type ImageFormat } from "../lib/dfgDownload";
+import type { Drawing } from "../lib/dfgDrawing";
 import {
   type ActivityNodeData,
   type ArcLabel,
@@ -31,6 +37,8 @@ import {
   type TerminalNodeData,
 } from "../lib/dfgLayout";
 import { num } from "../lib/format";
+import { useKeptViewport } from "../lib/keptView";
+import { keep, recall, sameInputs } from "../lib/pageState";
 
 type NodeData = (ActivityNodeData | TerminalNodeData) & { colours: Map<string, string> };
 type ArcData = LaidOutArc & { colour: string; width: number };
@@ -193,6 +201,19 @@ const ArcEdge = memo(({ id, data, markerEnd }: EdgeProps<Edge<ArcData>>) => {
 /** Grey of start and end arcs. */
 const GREY = "#9aa0a6";
 
+/**
+ * Colour of an arc: grey from a start node and to an end node (Nina, 2026-11-14; the start and end nodes carry the
+ * type's colour), otherwise its object type's colour.
+ *
+ * Example: the arc start:coil → crane move is grey; crane move → load truck of coil has coil's colour.
+ *
+ * @param arc The arc's object type and node ids.
+ * @param colours Colour per object type.
+ * @returns The colour.
+ */
+export const arcColour = (arc: { objectType: string; source: string; target: string }, colours: Map<string, string>) =>
+  arc.source.startsWith("start:") || arc.target.startsWith("end:") ? GREY : (colours.get(arc.objectType) ?? GREY);
+
 /** The legend, in grey above the graph. */
 const Legend = () => (
   <Text fz={11} lh={1.3} c="dimmed">
@@ -223,9 +244,7 @@ const toFlow = (layout: Layout, colours: Map<string, string>) => {
     connectable: false,
   }));
   const edges: Edge<ArcData>[] = layout.arcs.map((a) => {
-    // Start and end arcs are grey (Nina, 2026-11-14); the start and end nodes carry the type's colour.
-    const terminal = a.source.startsWith("start:") || a.target.startsWith("end:");
-    const colour = terminal ? GREY : (colours.get(a.objectType) ?? GREY);
+    const colour = arcColour(a, colours);
     return {
       id: a.id,
       source: a.source,
@@ -284,12 +303,78 @@ const followNodes = (edges: Edge<ArcData>[], offsets: Map<string, Offset>) =>
     };
   });
 
-/** Fit the view whenever a new layout arrives. */
-const FitOnChange = ({ generation }: { generation: number | null }) => {
+/**
+ * The download button at the top right of the graph: a menu with PDF, SVG, HTML and PNG and the option "With legend".
+ * The file shows the whole graph as drawn (dragged nodes included), not just the part zoomed in on, redrawn as plain
+ * shapes (`lib/dfgDrawing.ts`, `lib/dfgDownload.ts`). React Flow's panels (this button, the zoom controls) are not in it.
+ *
+ * @param drawing Returns the graph as currently drawn.
+ * @param logName The log's name, for the file name.
+ */
+const DownloadMenu = ({ drawing, logName }: { drawing: () => Drawing; logName?: string }) => {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [legend, setLegend] = useState(true);
+  const download = async (format: ImageFormat) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await downloadDrawing(drawing(), format, logName, { legend });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Panel position="top-right">
+      <Group gap={6} wrap="nowrap">
+        {error && (
+          <Text size="xs" c="red">
+            {error}
+          </Text>
+        )}
+        <Menu position="bottom-end" withinPortal shadow="sm" closeOnItemClick>
+          <Menu.Target>
+            <Tooltip label="Download the graph" withinPortal>
+              <ActionIcon size="sm" variant="default" loading={busy} aria-label="Download the graph">
+                <DownloadIcon size={13} />
+              </ActionIcon>
+            </Tooltip>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Label>Download as</Menu.Label>
+            {IMAGE_FORMATS.map(({ format, label, hint }) => (
+              <Menu.Item key={format} onClick={() => download(format)}>
+                <Text size="sm">{label}</Text>
+                <Text size="xs" c="dimmed">{hint}</Text>
+              </Menu.Item>
+            ))}
+            <Menu.Divider />
+            <Box px="sm" py={6}>
+              <Checkbox
+                size="xs"
+                label="With legend (object types and symbols)"
+                checked={legend}
+                onChange={(e) => setLegend(e.currentTarget.checked)}
+              />
+            </Box>
+          </Menu.Dropdown>
+        </Menu>
+      </Group>
+    </Panel>
+  );
+};
+
+/** For `FitOnChange` without a kept view: fit every new layout. */
+const NEVER = () => false;
+
+/** Fit the view whenever a new layout arrives (not for a layout whose zoom and pan were restored, `skip`). */
+const FitOnChange = ({ generation, skip }: { generation: number | null; skip: (generation: number | null) => boolean }) => {
   const { fitView } = useReactFlow();
   useEffect(() => {
-    if (generation !== null) requestAnimationFrame(() => fitView({ padding: 0.08, maxZoom: 1 }));
-  }, [generation, fitView]);
+    if (generation !== null && !skip(generation)) requestAnimationFrame(() => fitView({ padding: 0.08, maxZoom: 1 }));
+  }, [generation, fitView, skip]);
   return null;
 };
 
@@ -303,6 +388,10 @@ const FitOnChange = ({ generation }: { generation: number | null }) => {
  * @param compact Compact layout (little white space, `COMPACT_OPTIONS`).
  * @param height Height of the drawing area in pixels.
  * @param onDeselectActivity Called when the user double-clicks an activity node (to deselect it for all types).
+ * @param exportColours Colour per object type in the downloads (light scheme; default: `colours`).
+ * @param logName The log's name, for the file name of a download.
+ * @param stateKey Where the layout, the dragged positions and zoom and pan are kept (e.g. `dfg.view.<log id>`), so that
+ *   the graph looks as it was left when the page opens again with the same graph (`lib/keptView.ts`); none: not kept.
  */
 export const DfgGraph = ({
   graph,
@@ -312,6 +401,9 @@ export const DfgGraph = ({
   compact,
   height,
   onDeselectActivity,
+  exportColours,
+  logName,
+  stateKey,
 }: {
   graph: DirectlyFollowsGraph;
   colours: Map<string, string>;
@@ -320,17 +412,33 @@ export const DfgGraph = ({
   compact: boolean;
   height: number;
   onDeselectActivity?: (activity: string) => void;
+  exportColours?: Map<string, string>;
+  logName?: string;
+  stateKey?: string;
 }) => {
-  const [layout, setLayout] = useState<Layout | null>(null);
+  // The layout kept when the page was left, if it was made for the same graph and look settings.
+  const inputs = [graph, direction, arcLabel, compact];
+  const keptLayout = () => {
+    const kept = stateKey ? recall<{ inputs: unknown[]; layout: Layout }>(`${stateKey}.layout`) : undefined;
+    return kept && sameInputs(kept.inputs, inputs) ? kept.layout : null;
+  };
+  const [layout, setLayoutState] = useState<Layout | null>(keptLayout);
   const [error, setError] = useState<string | null>(null);
-  const current = useRef<{ layout: Layout | null; direction: Direction; arcLabel: ArcLabel; compact: boolean } | null>(null);
+  const setLayout = (next: Layout) => {
+    if (stateKey) keep(`${stateKey}.layout`, { inputs, layout: next });
+    setLayoutState(next);
+  };
   useEffect(() => {
     let cancelled = false;
     setError(null);
+    const kept = keptLayout();
+    if (kept) {
+      setLayoutState(kept);
+      return;
+    }
     layoutGraph(graph, direction, arcLabel, compact).then(
       (result) => {
         if (cancelled) return;
-        current.current = { layout: result, direction, arcLabel, compact };
         setLayout(result);
       },
       (err: unknown) => !cancelled && setError(String(err)),
@@ -338,15 +446,23 @@ export const DfgGraph = ({
     return () => {
       cancelled = true;
     };
+    // The kept layout and `setLayout` follow from these inputs and `stateKey`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph, direction, arcLabel, compact]);
   const flow = useMemo(() => (layout ? toFlow(layout, colours) : null), [layout, colours]);
   // Dragged node positions, kept per layout generation: a new ELK run (a setting changed) starts from its own
   // positions.
   const generation = layout?.generation ?? null;
-  const [dragged, setDragged] = useState<{ generation: number | null; nodes: Map<string, Node<NodeData>> }>({
-    generation: null,
-    nodes: new Map(),
+  type Dragged = { generation: number | null; nodes: Map<string, Node<NodeData>> };
+  const [dragged, setDragged] = useState<Dragged>(() => {
+    const kept = stateKey ? recall<Dragged>(`${stateKey}.dragged`) : undefined;
+    return kept && kept.generation === generation ? kept : { generation: null, nodes: new Map() };
   });
+  useEffect(() => {
+    if (stateKey) keep(`${stateKey}.dragged`, dragged);
+  }, [stateKey, dragged]);
+  // Zoom and pan as left (only for the layout shown when the page opens again; new layouts are fitted).
+  const { skipFit, ...viewport } = useKeptViewport(`${stateKey}.viewport`, generation);
   const nodes = useMemo(() => {
     const flowNodes = flow?.nodes ?? [];
     if (dragged.generation !== generation) return flowNodes;
@@ -378,6 +494,20 @@ export const DfgGraph = ({
     }
     return followNodes(flow.edges, offsets);
   }, [flow, nodes]);
+  // The graph as drawn (current positions, bent arcs), for the downloads, in the export colours (start and end arcs
+  // grey, as on the page).
+  const drawing = useMemo<Drawing>(() => {
+    const light = exportColours ?? colours;
+    return {
+      nodes: nodes.map((n) => ({ x: n.position.x, y: n.position.y, data: n.data })),
+      arcs: edges.flatMap((e) => (e.data ? [{ ...e.data, colour: arcColour(e.data, light) }] : [])),
+      colours: light,
+      arcLabel,
+    };
+  }, [nodes, edges, colours, exportColours, arcLabel]);
+  const drawingRef = useRef(drawing);
+  drawingRef.current = drawing;
+  const currentDrawing = useCallback(() => drawingRef.current, []);
 
   if (error) return <Alert color="red">Layout failed: {error}</Alert>;
   if (!flow) return <Loader size="sm" />;
@@ -409,7 +539,7 @@ export const DfgGraph = ({
           elementsSelectable={false}
           minZoom={0.05}
           maxZoom={3}
-          fitView
+          {...(stateKey ? viewport : { fitView: true })}
           fitViewOptions={{ padding: 0.08, maxZoom: 1 }}
           // Double click on an activity deselects it for every object type (Nina, 2026-11-19); no zoom on double click.
           zoomOnDoubleClick={false}
@@ -430,7 +560,8 @@ export const DfgGraph = ({
           }}
         >
           <Controls showInteractive={false} />
-          <FitOnChange generation={generation} />
+          <DownloadMenu drawing={currentDrawing} logName={logName} />
+          <FitOnChange generation={generation} skip={stateKey ? skipFit : NEVER} />
         </ReactFlow>
       </ReactFlowProvider>
     </Box>

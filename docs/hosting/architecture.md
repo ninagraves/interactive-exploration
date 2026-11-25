@@ -11,10 +11,11 @@
   - `instances/`: the content of the page "Instances" (documented in `docs/pages/instances.md`).
 - **Frontend module** `frontend-modules/interactive-dfg/`: React (Mantine UI), registered in `app/ocelescope.config.ts`.
   - `src/index.ts`: module definition (two pages).
-  - `src/routes/DirectlyFollowsGraph.tsx`: the page; `src/components/ModulePage.tsx` its frame (title, backend versions).
+  - `src/routes/DirectlyFollowsGraph.tsx`: the page; `src/components/ModulePage.tsx` the frame of both pages (title, backend versions, kept scroll position and answers).
   - `src/components/DfgGraph.tsx` (drawing with React Flow), `DfgToolbar.tsx`, `DfgSettings.tsx` (sidebar), `DfgSave.tsx`.
   - `src/routes/Instances.tsx`: the page "Instances"; `src/components/ObjectProfileTable.tsx` (with `ProfileColumnFilter.tsx`, `ShortList.tsx`), `ObjectTracesChart.tsx`, `ObjectGraphChart.tsx`.
-  - `src/lib/dfgLayout.ts` (ELK layout), `dfgArcs.ts` (arc steps in the browser), `dfgView.ts`, `palette.ts` (the only source of colours), `pageState.ts` (settings kept per log in the tab's sessionStorage), `useDebounced.ts`, `scheme.ts`.
+  - `src/lib/dfgLayout.ts` (ELK layout), `dfgArcs.ts` (arc steps in the browser), `dfgActivitySearch.ts` (activity search with object type chips), `dfgDrawing.ts` and `dfgDownload.ts` (download of the graph), `dfgView.ts`, `palette.ts` (the only source of colours), `logName.ts`, `useDebounced.ts`, `scheme.ts`.
+  - Page state (`docs/hosting/state-and-caching.md`): `src/lib/pageState.ts` (values kept per key in memory and the tab's sessionStorage), `keptView.ts` (zoom and pan, scroll positions), `queries.ts` (answers kept 30 min).
   - `src/api/`: typed API client generated from the backend's OpenAPI schema by Orval (`pnpm run build:modules`); not committed.
 
 ## Data
